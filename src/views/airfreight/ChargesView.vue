@@ -286,14 +286,14 @@ watch(selectedRow, (row) => {
 
             <div class="min-w-0">
               <div class="truncate text-[13px] font-medium text-[#1F2937]">{{ customer }}</div>
-              <div class="text-[11px] text-[#9CA3AF]">{{ lane }} · ETD {{ etd }}</div>
+              <div class="text-[11px] text-[#6B7280]">{{ lane }} · ETD {{ etd }}</div>
             </div>
 
             <div class="flex-1" />
 
             <div class="flex flex-wrap items-center">
               <div class="px-3 py-1 text-right sm:px-4">
-                <div class="mb-0.5 text-[9px] font-bold tracking-wide text-[#9CA3AF]">
+                <div class="mb-0.5 text-[10px] font-bold tracking-wide text-[#6B7280]">
                   SELL ({{ home }})
                 </div>
                 <div class="text-sm font-semibold text-[#1F2937]">
@@ -301,7 +301,7 @@ watch(selectedRow, (row) => {
                 </div>
               </div>
               <div class="border-l border-[#E4E7EC] px-3 py-1 text-right sm:px-4">
-                <div class="mb-0.5 text-[9px] font-bold tracking-wide text-[#9CA3AF]">
+                <div class="mb-0.5 text-[10px] font-bold tracking-wide text-[#6B7280]">
                   COST ({{ home }})
                 </div>
                 <div class="text-sm font-semibold text-[#1F2937]">
@@ -309,7 +309,7 @@ watch(selectedRow, (row) => {
                 </div>
               </div>
               <div class="border-l border-[#E4E7EC] px-3 py-1 text-right sm:px-4">
-                <div class="mb-0.5 text-[9px] font-bold tracking-wide text-[#9CA3AF]">PROV. GP</div>
+                <div class="mb-0.5 text-[10px] font-bold tracking-wide text-[#6B7280]">PROV. GP</div>
                 <div class="flex items-baseline justify-end gap-1.5">
                   <span
                     class="text-sm font-semibold"
@@ -357,7 +357,7 @@ watch(selectedRow, (row) => {
                   class="absolute right-0 top-[calc(100%+6px)] z-50 w-[280px] rounded-[10px] border border-[#E4E7EC] bg-white p-4 shadow-[0_8px_24px_rgba(0,0,0,0.09)]"
                 >
                   <div
-                    class="mb-3 text-[11px] font-bold tracking-wide text-[#9CA3AF]"
+                    class="mb-3 text-[11px] font-bold tracking-wide text-[#6B7280]"
                   >
                     RATE SETTINGS
                   </div>
@@ -433,7 +433,7 @@ watch(selectedRow, (row) => {
               {{ t(`charges.filters.${filterAsLedger(f)}`) }}
               <span
                 class="min-w-4 rounded-full px-1 text-center text-[10px] font-bold"
-                :class="filter === f ? 'bg-primary text-white' : 'bg-[#F3F4F6] text-[#9CA3AF]'"
+                :class="filter === f ? 'bg-primary text-white' : 'bg-[#F3F4F6] text-[#6B7280]'"
               >
                 {{ chipCounts[f] }}
               </span>
@@ -530,8 +530,8 @@ watch(selectedRow, (row) => {
         <!-- AP/AR ledger table -->
         <div class="overflow-hidden rounded-[10px] border border-[#E4E7EC] bg-white">
           <div
-            class="grid gap-0 border-b border-[#E4E7EC] bg-[#F9FAFB] px-3.5 py-2 text-[10px] font-bold tracking-wide text-[#9CA3AF]"
-            style="grid-template-columns: 90px 1fr 160px 1fr 80px 44px"
+            class="grid gap-0 border-b border-[#E4E7EC] bg-[#F9FAFB] px-3.5 py-1.5 text-[10px] font-bold tracking-wide text-[#6B7280]"
+            style="grid-template-columns: 90px 1fr 160px 1fr 80px 24px"
           >
             <span>STATUS</span>
             <span>AP · COST</span>
@@ -544,8 +544,8 @@ watch(selectedRow, (row) => {
           <div
             v-for="(row, i) in visibleRows"
             :key="row.code"
-            class="grid cursor-pointer items-center gap-0 px-3.5 py-2.5 transition-colors"
-            style="grid-template-columns: 90px 1fr 160px 1fr 80px 44px"
+            class="grid cursor-pointer items-center gap-0 px-3.5 py-2 transition-colors"
+            style="grid-template-columns: 90px 1fr 160px 1fr 80px 24px"
             :class="[
               i < visibleRows.length - 1 ? 'border-b border-[#F9FAFB]' : '',
               selectedCode === row.code ? 'bg-[#F0FDFB]' : 'bg-white hover:bg-[#FAFAFA]',
@@ -567,7 +567,7 @@ watch(selectedRow, (row) => {
                   {{ money(row.ap.actualAmount ?? row.apAmount, row.currency) }}
                   <span
                     v-if="row.ap.cafApplied"
-                    class="ml-1 rounded bg-primary-tint px-1 text-[9px] font-bold text-primary"
+                    class="ml-1 rounded bg-primary-tint px-1 text-[10px] font-bold text-primary"
                     >+CAF</span
                   >
                 </template>
@@ -635,10 +635,10 @@ watch(selectedRow, (row) => {
               >
                 {{ row.marginPct.toFixed(1) }}%
               </span>
-              <span v-else class="text-[11px] text-[#9CA3AF]">—</span>
+              <span v-else class="text-[11px] text-[#6B7280]">—</span>
             </div>
 
-            <div class="flex justify-center text-[#9CA3AF]">···</div>
+            <div class="flex justify-center text-[#6B7280]">···</div>
           </div>
 
           <div
@@ -708,7 +708,7 @@ watch(selectedRow, (row) => {
                 {{ tab.label }}
                 <span
                   v-if="tab.id === 'audit'"
-                  class="ml-1 text-[10px] text-[#9CA3AF]"
+                  class="ml-1 text-[10px] text-[#6B7280]"
                 >
                   {{
                     (selectedRow.ap?.audit?.length ?? 0) + (selectedRow.ar?.audit?.length ?? 0)
@@ -723,7 +723,7 @@ watch(selectedRow, (row) => {
             <div v-if="drawerTab === 'ap'" class="flex flex-col gap-4">
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
                 >
                   Vendor / Supplier
                 </div>
@@ -749,7 +749,7 @@ watch(selectedRow, (row) => {
 
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
                 >
                   Accrued vs Actual
                 </div>
@@ -811,7 +811,7 @@ watch(selectedRow, (row) => {
 
               <div v-if="selectedRow.ap?.cafApplied">
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
                 >
                   CAF Breakdown
                 </div>
@@ -846,7 +846,7 @@ watch(selectedRow, (row) => {
             <div v-else-if="drawerTab === 'ar'" class="flex flex-col gap-4">
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
                 >
                   Customer / Bill-To
                 </div>
@@ -871,7 +871,7 @@ watch(selectedRow, (row) => {
               </div>
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
                 >
                   Sell Amount
                 </div>
@@ -888,7 +888,7 @@ watch(selectedRow, (row) => {
               </div>
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
                 >
                   Margin Summary
                 </div>
@@ -932,7 +932,7 @@ watch(selectedRow, (row) => {
             <!-- Audit -->
             <div v-else>
               <div
-                class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9CA3AF]"
+                class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
               >
                 Change History
               </div>
@@ -960,7 +960,7 @@ watch(selectedRow, (row) => {
                 <div class="pb-3.5">
                   <div class="mb-0.5 flex items-baseline gap-1.5">
                     <span class="text-xs font-semibold text-[#1F2937]">{{ entry.by }}</span>
-                    <span class="text-[10px] text-[#9CA3AF]">{{ entry.at }}</span>
+                    <span class="text-[10px] text-[#6B7280]">{{ entry.at }}</span>
                   </div>
                   <div class="text-xs text-[#374151]">{{ entry.kind }}</div>
                   <div

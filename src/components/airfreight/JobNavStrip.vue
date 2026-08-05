@@ -149,7 +149,7 @@ function onTabClick(item: (typeof items.value)[number]) {
           <!-- Timeline ● OS -->
           <span
             v-if="item.id === 'timeline' && osSuggest"
-            class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-teal-800"
+            class="inline-flex items-center gap-1 rounded-full px-1.5 py-0.5 text-[10px] font-bold tracking-wide text-teal-800"
             :class="
               glowTab === 'timeline' || osPulse
                 ? 'bg-primary text-white shadow-sm'
