@@ -1,5 +1,6 @@
 import type { ChargesPayload } from '@/api/types'
 import { applyCafToLines } from '@/lib/chargesMoney'
+import { legacyJobNoForShipment } from './jobIdentities'
 
 function seed(payload: ChargesPayload): ChargesPayload {
   const clone = structuredClone(payload)
@@ -117,7 +118,7 @@ const raw: Record<number, ChargesPayload> = {
             id: 'a1',
             kind: 'accrual',
             at: '2026-07-28 09:12',
-            by: 'Ops · Echo',
+            by: 'Ops · Sarah Jenkins',
             amount: 5200,
           },
         ],
@@ -142,7 +143,7 @@ const raw: Record<number, ChargesPayload> = {
             id: 'a2',
             kind: 'accrual',
             at: '2026-07-28 09:14',
-            by: 'Ops · Echo',
+            by: 'Ops · Sarah Jenkins',
             amount: 4100,
           },
         ],
@@ -199,9 +200,11 @@ const raw: Record<number, ChargesPayload> = {
     shipmentId: 4096,
     jobNo: 'AF-4096',
     pack: 'AU',
-    moneyState: 'actuals_posted',
-    blocked: false,
-    blockReason: 'none',
+    moneyState: 'blocked',
+    blocked: true,
+    blockReason: 'customs',
+    blockMessage:
+      'AU clearance held — accrue and invoice locked until Cleared (mock chip).',
     cafPercent: 3.5,
     fxToAud: 1.53,
     homeCurrency: 'AUD',
@@ -216,7 +219,7 @@ const raw: Record<number, ChargesPayload> = {
         amountAud: 0,
         currency: 'USD',
         rateSource: 'tariff',
-        state: 'invoiced_ar',
+        state: 'rated',
         partyName: 'Sydney Retail Group',
         ratingBasis: 'Chargeable weight',
         oversea: true,
@@ -231,41 +234,23 @@ const raw: Record<number, ChargesPayload> = {
         amount: 2950,
         amountAud: 0,
         currency: 'USD',
-        rateSource: 'actual',
-        state: 'variance',
-        accruedAmount: 2950,
-        actualAmount: 3100,
-        varianceAmount: 150,
+        rateSource: 'safeguard',
+        state: 'safeguard',
         partyName: 'Qantas Freight',
         ratingBasis: 'Chargeable weight',
         oversea: true,
-        audit: [
-          {
-            id: 'b1',
-            kind: 'accrual',
-            at: '2026-07-18 11:00',
-            by: 'Ops · Jarod',
-            amount: 2950,
-          },
-          {
-            id: 'b2',
-            kind: 'actual',
-            at: '2026-07-30 16:20',
-            by: 'Finance · Mia',
-            amount: 3100,
-          },
-        ],
+        audit: [],
       },
       {
         id: 'c4096-3',
         code: 'CFS',
-        description: 'Origin CFS',
+        description: 'Origin CFS sell',
         side: 'AR',
         amount: 450,
         amountAud: 0,
         currency: 'USD',
         rateSource: 'manual',
-        state: 'invoiced_ar',
+        state: 'rated',
         partyName: 'Sydney Retail Group',
         ratingBasis: 'Per kg',
         oversea: true,
@@ -280,25 +265,12 @@ const raw: Record<number, ChargesPayload> = {
         amount: 400,
         amountAud: 0,
         currency: 'USD',
-        rateSource: 'actual',
-        state: 'actual_ap',
-        accruedAmount: 400,
-        actualAmount: 420,
-        varianceAmount: 20,
+        rateSource: 'safeguard',
+        state: 'safeguard',
         partyName: 'PVG CFS Co.',
         ratingBasis: 'Per kg',
         oversea: true,
-        varianceCleared: true,
-        varianceNote: 'CFS vendor invoice includes weekend overtime.',
-        audit: [
-          {
-            id: 'c1',
-            kind: 'variance_approved',
-            at: '2026-07-30 17:01',
-            by: 'Finance · Mia',
-            note: 'CFS vendor invoice includes weekend overtime.',
-          },
-        ],
+        audit: [],
       },
     ],
     gp: {
@@ -309,11 +281,11 @@ const raw: Record<number, ChargesPayload> = {
       actualGp: null,
       varianceTotal: null,
       currency: 'AUD',
-      wip: false,
+      wip: true,
       postedCount: 0,
       unpostedCount: 0,
     },
-    allowedActions: ['post_actuals', 'open_invoice'],
+    allowedActions: [],
   },
 }
 
@@ -324,5 +296,8 @@ export const chargesByShipment: Record<number, ChargesPayload> = Object.fromEntr
 export function cloneCharges(shipmentId: number): ChargesPayload | null {
   const seedRow = chargesByShipment[shipmentId]
   if (!seedRow) return null
-  return structuredClone(seedRow)
+  const clone = structuredClone(seedRow)
+  const legacyNo = legacyJobNoForShipment(shipmentId)
+  if (legacyNo) clone.jobNo = legacyNo
+  return clone
 }

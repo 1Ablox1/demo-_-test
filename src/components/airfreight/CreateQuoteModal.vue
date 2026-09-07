@@ -3,16 +3,35 @@ import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import QuickCreateCustomerDrawer from '@/components/airfreight/QuickCreateCustomerDrawer.vue'
-import SmartAutocomplete from '@/components/ui/SmartAutocomplete.vue'
+import SmartAutocomplete from '@/components/airfreight/SmartAutocomplete.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
 import type { MasterSelection, QuickCreateCustomerInput } from '@/mdm/types'
+import { toast as notify } from 'vue-sonner'
 import {
   frequentAirportValues,
   frequentCustomerValues,
   masterAirports,
+  MODULE1_AI_LANE,
 } from '@/mocks/fixtures/masters'
 import { useLifecycleStore } from '@/stores/lifecycle'
 import { useMastersStore } from '@/stores/masters'
 import { useTasksStore } from '@/stores/tasks'
+import { useSeatPermissions } from '@/composables/useSeatPermissions'
+import { useAllowedActions } from '@/composables/useAllowedActions'
+import {
+  canConvertQuoteToBooking,
+  canEditQuoteForm,
+  type LifecyclePermissionContext,
+} from '@/lib/rolePermissions'
+import { QUOTE_STAGE_SHIPMENT_ID, MODULE1_BOOKING_JOB_NO, MODULE1_BOOKING_SHIPMENT_ID, type CreateJobLobPrefix } from '@/lib/createJobIntent'
 
 export type TradeDirection = 'air_export' | 'air_import' | 'cross_trade'
 type DirectionSource = 'default' | 'inferred' | 'user'
@@ -28,9 +47,16 @@ interface ChargeLine {
   unit: 'shipment' | 'kg' | 'lb' | 'piece'
 }
 
-const props = defineProps<{
-  open: boolean
-}>()
+const props = withDefaults(
+  defineProps<{
+    open: boolean
+    /** From Create Job modal — Module 1 defaults to AI */
+    lobPrefix?: CreateJobLobPrefix
+    /** Finance / Admin view-only (same form, routed like other create flows) */
+    readOnly?: boolean
+  }>(),
+  { lobPrefix: 'AI', readOnly: false },
+)
 
 const emit = defineEmits<{
   close: []
@@ -43,15 +69,16 @@ const life = useLifecycleStore()
 const tasks = useTasksStore()
 const masters = useMastersStore()
 
-const HOME = ['US'] as const
+/** Module 1 home market = AU (Western Air Import trial). */
+const HOME = ['AU'] as const
 
 const INCOTERMS = ['EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP']
 const CURRENCIES = ['USD', 'AUD', 'GBP', 'EUR', 'HKD', 'JPY', 'SGD', 'CNY']
 const SVC_LEVELS = [
-  { value: 'airport_airport', label: 'Airport – Airport' },
-  { value: 'door_airport', label: 'Door – Airport' },
-  { value: 'airport_door', label: 'Airport – Door' },
-  { value: 'door_door', label: 'Door – Door' },
+  { value: 'airport_airport', label: 'Airport  Airport' },
+  { value: 'door_airport', label: 'Door  Airport' },
+  { value: 'airport_door', label: 'Airport  Door' },
+  { value: 'door_door', label: 'Door  Door' },
 ]
 const AIRLINES = [
   { label: 'China Airlines (CI)', value: 'CI' },
@@ -71,9 +98,14 @@ const DIR_LABEL: Record<TradeDirection, string> = {
 
 const COMPLIANCE: Record<TradeDirection, string[]> = {
   air_export: ['CBP AES filing required before ETD', 'SED required for items >USD 2,500'],
-  air_import: ['CBP ISF 10+2 required 24h before loading', 'C-TPAT status may apply'],
+  air_import: [
+    'AU clearance status on job chip only — N10 / ICS = Ctrl-X later',
+    'Ops fulfil checklist · Finance stamps before Accrue unlocks',
+  ],
   cross_trade: ['IATA multi-airline coordination needed', 'Dual-customs entry required'],
 }
+
+/** Module 1 golden booking after convert (Echo poc-job-001). — imported from createJobIntent */
 
 function makeLines(dir: TradeDirection): ChargeLine[] {
   const base: ChargeLine[] = [
@@ -139,10 +171,42 @@ function deriveCW(gw: number | null, vol: number | null, vu: VolumeUnit): number
   return Math.max(gw, vw)
 }
 
-const canEdit = computed(() => tasks.role === 'sales' || tasks.role === 'operations')
-const isFinance = computed(() => tasks.role === 'finance')
+const { raciEnforce, readOnlyLabel: seatReadOnlyLabel } = useSeatPermissions()
+const allowed = useAllowedActions()
 
-const direction = ref<TradeDirection>('air_export')
+const quoteLifecycleCtx = computed((): LifecyclePermissionContext | undefined => {
+  if (!life.lifecycle || life.lifecycle.shipmentId !== QUOTE_STAGE_SHIPMENT_ID) return undefined
+  return {
+    milestoneId: life.lifecycle.currentMilestoneId,
+    tasks: life.lifecycle.tasks,
+    gates: life.lifecycle.gates,
+  }
+})
+
+const canEdit = computed(() => {
+  if (props.readOnly) return false
+  const ctx = quoteLifecycleCtx.value
+  const permitted = allowed.isAllowed('edit_quote', () => canEditQuoteForm(tasks.role, ctx))
+  if (!raciEnforce.value && !permitted && (tasks.role === 'sales' || tasks.role === 'operations')) {
+    return true
+  }
+  return permitted
+})
+
+const canConvertQuote = computed(() => {
+  const ctx = quoteLifecycleCtx.value
+  const permitted = allowed.isAllowed('convert_quote', () =>
+    canConvertQuoteToBooking(tasks.role, ctx),
+  )
+  if (!raciEnforce.value && tasks.role === 'operations') return true
+  return permitted
+})
+
+const convertBlockReason = computed(() => allowed.reason('convert_quote'))
+
+const readOnlyLabel = computed(() => seatReadOnlyLabel.value)
+
+const direction = ref<TradeDirection>('air_import')
 const directionSource = ref<DirectionSource>('default')
 const inferredDir = ref<TradeDirection | null>(null)
 
@@ -169,24 +233,24 @@ const hsCode = ref('')
 const isDangerousGoods = ref(false)
 const dgClass = ref('')
 
-const incoterm = ref('FOB')
-const currency = ref('USD')
+const incoterm = ref('CIP')
+const currency = ref<string>(MODULE1_AI_LANE.currency)
 const validUntil = ref('')
 const notes = ref('')
-const lines = ref<ChargeLine[]>(makeLines('air_export'))
+const lines = ref<ChargeLine[]>(makeLines('air_import'))
+const converting = ref(false)
 
 const ratesOpen = ref(false)
 const escConfirm = ref(false)
 const saved = ref(false)
 const saving = ref(false)
-const toast = ref<string | null>(null)
 
 const createOpen = ref(false)
 const createSeed = ref('')
 
 const actorName = computed(() => {
   const map: Record<string, string> = {
-    sales: 'Mia (Sales)',
+    sales: 'Alex Rivera (Sales)',
     operations: 'Ops desk',
     finance: 'Finance',
     admin: 'Admin',
@@ -202,9 +266,9 @@ const needsConsignee = computed(
 )
 
 const customerLabel = computed(() => {
-  if (direction.value === 'air_export') return 'Customer — Shipper-side bill-to'
-  if (direction.value === 'air_import') return 'Customer — Consignee-side bill-to'
-  return 'Customer — Controlling office'
+  if (direction.value === 'air_export') return 'Customer  Shipper-side bill-to'
+  if (direction.value === 'air_import') return 'Customer  Consignee-side bill-to'
+  return 'Customer  Controlling office'
 })
 
 const progress = computed(() => [
@@ -232,17 +296,41 @@ const quoteComplete = computed(
     Boolean(incoterm.value && currency.value && commodity.value.trim()),
 )
 
+function airportSelection(code: string): MasterSelection {
+  const full = masterAirports.find((x) => x.value === code)
+  if (!full) return null
+  return { label: full.label, value: full.value, kind: 'airport' }
+}
+
 function resetForm() {
-  direction.value = 'air_export'
+  const isAi = props.lobPrefix === 'AI'
+  const isAe = props.lobPrefix === 'AE'
+  direction.value = isAe ? 'air_export' : 'air_import'
   directionSource.value = 'default'
   inferredDir.value = null
   customer.value = null
   shipper.value = null
   consignee.value = null
   notifyParty.value = null
-  originAirport.value = null
-  destAirport.value = null
-  airline.value = ''
+  if (isAi) {
+    originAirport.value = airportSelection(MODULE1_AI_LANE.origin)
+    destAirport.value = airportSelection(MODULE1_AI_LANE.dest)
+    airline.value = MODULE1_AI_LANE.airline
+    currency.value = MODULE1_AI_LANE.currency
+    incoterm.value = 'CIP'
+  } else if (isAe) {
+    originAirport.value = airportSelection('SYD')
+    destAirport.value = airportSelection('LAX')
+    airline.value = 'QF'
+    currency.value = 'AUD'
+    incoterm.value = 'FOB'
+  } else {
+    originAirport.value = null
+    destAirport.value = null
+    airline.value = ''
+    currency.value = 'USD'
+    incoterm.value = 'FOB'
+  }
   etdFrom.value = ''
   etdTo.value = ''
   serviceLevel.value = 'airport_airport'
@@ -257,21 +345,23 @@ function resetForm() {
   hsCode.value = ''
   isDangerousGoods.value = false
   dgClass.value = ''
-  incoterm.value = 'FOB'
-  currency.value = 'USD'
   validUntil.value = ''
   notes.value = ''
-  lines.value = makeLines('air_export')
+  lines.value = makeLines(direction.value)
   ratesOpen.value = false
   escConfirm.value = false
   saved.value = false
-  toast.value = null
+  converting.value = false
 }
 
 watch(
   () => props.open,
   (v) => {
-    if (v) resetForm()
+    if (v) {
+      resetForm()
+      void masters.refreshCustomers()
+      void life.load(QUOTE_STAGE_SHIPMENT_ID)
+    }
   },
 )
 
@@ -313,6 +403,10 @@ function requestClose() {
   emit('close')
 }
 
+function onOpenChange(next: boolean) {
+  if (!next) requestClose()
+}
+
 function confirmDiscard() {
   escConfirm.value = false
   emit('close')
@@ -323,8 +417,8 @@ function openCreate(query: string) {
   createOpen.value = true
 }
 
-function onCustomerCreated(input: QuickCreateCustomerInput) {
-  const draft = masters.createCustomerDraft(input)
+async function onCustomerCreated(input: QuickCreateCustomerInput) {
+  const draft = await masters.createCustomerDraft(input)
   customer.value = {
     label: draft.label,
     value: draft.value,
@@ -334,7 +428,7 @@ function onCustomerCreated(input: QuickCreateCustomerInput) {
     approverSeat: draft.approverSeat,
   }
   createOpen.value = false
-  toast.value = t('mdm.createdPending')
+  notify.success(t('mdm.createdPending'))
 }
 
 function patchLine(id: string, patch: Partial<ChargeLine>) {
@@ -362,20 +456,20 @@ function removeLine(id: string) {
 async function saveDraft() {
   if (!canEdit.value) return
   saving.value = true
-  toast.value = null
   try {
-    await life.load(8801)
+    await life.load(QUOTE_STAGE_SHIPMENT_ID)
     if (quoteComplete.value) {
       await life.completeTask('task-8801-create-quote')
       await life.clearGate('gate-quote-complete')
-      toast.value =
+      notify.success(
         customer.value?.status === 'pending_approval'
           ? t('quote.savedReadyPendingCustomer')
-          : t('quote.savedReady')
+          : t('quote.savedReady'),
+      )
       await tasks.load()
       saved.value = true
     } else {
-      toast.value = t('quote.savedDraft')
+      notify.success(t('quote.savedDraft'))
       saved.value = true
     }
   } finally {
@@ -383,13 +477,35 @@ async function saveDraft() {
   }
 }
 
+async function convertToBooking() {
+  if (!canEdit.value || !canConvertQuote.value || !quoteComplete.value || converting.value) return
+  converting.value = true
+  try {
+    await saveDraft()
+    await life.load(QUOTE_STAGE_SHIPMENT_ID)
+    try {
+      await life.completeTask('task-8801-convert')
+    } catch {
+      /* convert task may already be unblocked after gate clear */
+    }
+    notify.success(t('quote.converted', { jobNo: MODULE1_BOOKING_JOB_NO }))
+    emit('submitted')
+    void router.push({
+      name: 'job-context',
+      params: { shipmentId: String(MODULE1_BOOKING_SHIPMENT_ID) },
+    })
+    emit('close')
+  } finally {
+    converting.value = false
+  }
+}
+
 async function sendQuote() {
   if (!canEdit.value || progressScore.value < 3) return
   await saveDraft()
   if (quoteComplete.value) {
+    notify.success(t('quote.sentHint'))
     emit('submitted')
-    void router.push({ name: 'job-spine', params: { shipmentId: '8801' } })
-    emit('close')
   }
 }
 
@@ -401,55 +517,42 @@ function onNum(raw: string): number | null {
 </script>
 
 <template>
-  <Teleport to="body">
-    <div v-if="open" class="fixed inset-0 z-[300]">
-      <div
-        class="absolute inset-0 bg-slate-900/40 backdrop-blur-[3px]"
-        @click="requestClose"
-      />
-
-      <div
-        class="absolute left-1/2 top-1/2 flex max-h-[90vh] w-[min(92vw,1080px)] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-[14px] border border-[#E4E7EC] bg-white shadow-[0_24px_64px_rgba(0,0,0,0.16)]"
-        role="dialog"
-        aria-modal="true"
-        :aria-label="t('quote.modalTitle')"
-      >
-        <!-- Header -->
-        <div class="shrink-0 border-b border-[#E4E7EC] bg-white px-5 pt-3.5">
+  <Dialog :open="open" @update:open="onOpenChange">
+    <DialogContent
+      class="flex max-h-[90vh] w-[min(92vw,1080px)] max-w-[min(92vw,1080px)] flex-col gap-0 overflow-hidden rounded-[14px] p-0 sm:max-w-[1080px]"
+      :show-close-button="false"
+      @escape-key-down="(e) => { e.preventDefault(); requestClose() }"
+    >
+        <DialogHeader class="shrink-0 space-y-0 border-b border-border bg-card px-5 pt-3.5 text-left">
           <div class="mb-2.5 flex items-start gap-3">
             <div class="min-w-0 flex-1">
               <div class="flex flex-wrap items-center gap-2">
-                <h2 class="m-0 text-base font-semibold tracking-tight text-[#1F2937]">
+                <DialogTitle class="m-0 text-base font-semibold tracking-tight">
                   {{ t('quote.modalTitle') }}
-                </h2>
-                <span
-                  class="rounded bg-[#F3F4F6] px-1.5 py-0.5 text-[9px] font-bold tracking-wide text-[#9CA3AF]"
-                >
+                </DialogTitle>
+                <Badge variant="secondary" class="rounded-md text-[9px] font-bold tracking-wide">
                   DRAFT
-                </span>
+                </Badge>
               </div>
-              <div class="mt-1 text-[11px] text-[#9CA3AF]">
+              <DialogDescription class="mt-1 text-[11px]">
                 {{ progressScore }} of 5 sections complete
-              </div>
+              </DialogDescription>
             </div>
 
-            <span
-              v-if="isFinance"
-              class="rounded-[5px] border border-[#FED7AA] bg-[#FFEDD5] px-2.5 py-0.5 text-[11px] font-medium text-[#B45309]"
+            <Badge
+              v-if="readOnlyLabel && !canEdit"
+              variant="high"
+              class="rounded-[5px] px-2.5 py-0.5 text-[11px] font-medium"
             >
-              Finance — read-only
-            </span>
+              {{ readOnlyLabel }}
+            </Badge>
 
-            <button
-              type="button"
-              class="flex h-7 w-7 shrink-0 items-center justify-center rounded-[7px] border border-[#E4E7EC] bg-white text-lg leading-none text-[#6B7280]"
-              @click="requestClose"
-            >
-              ×
-            </button>
+            <Button type="button" variant="outline" size="icon-sm" class="shrink-0" @click="requestClose">
+              x
+            </Button>
           </div>
 
-          <div class="h-[3px] overflow-hidden rounded-sm bg-[#F3F4F6]">
+          <div class="h-[3px] overflow-hidden rounded-sm bg-muted">
             <div
               class="h-[3px] rounded-sm bg-primary transition-all duration-300"
               :style="{ width: `${(progressScore / 5) * 100}%` }"
@@ -457,17 +560,13 @@ function onNum(raw: string): number | null {
           </div>
 
           <div class="flex flex-wrap items-center gap-2.5 py-2.5">
-            <div class="flex gap-0.5 rounded-[9px] bg-[#F3F4F6] p-[3px]">
+            <div class="flex gap-0.5 rounded-[9px] bg-muted p-[3px]">
               <button
                 v-for="dir in (['air_export', 'air_import', 'cross_trade'] as TradeDirection[])"
                 :key="dir"
                 type="button"
                 class="rounded-[7px] px-3.5 py-1.5 text-xs font-medium transition"
-                :class="
-                  direction === dir
-                    ? 'bg-white text-[#1F2937] shadow-[0_1px_4px_rgba(0,0,0,0.08)]'
-                    : 'bg-transparent text-[#6B7280]'
-                "
+                :class="direction === dir ? 'bg-card text-foreground shadow-sm' : 'bg-transparent text-muted-foreground'"
                 :disabled="!canEdit"
                 @click="setDir(dir)"
               >
@@ -477,33 +576,27 @@ function onNum(raw: string): number | null {
 
             <span
               v-if="inferredDir && directionSource === 'inferred'"
-              class="inline-flex items-center gap-1.5 rounded-[5px] border border-[#A7F3D0] bg-[#E6F9F6] px-2 py-0.5 text-[11px] text-[#0F766E]"
+              class="inline-flex items-center gap-1.5 rounded-[5px] border border-emerald-200 bg-primary-tint px-2 py-0.5 text-[11px] text-teal-800"
             >
               <span class="inline-block h-1.5 w-1.5 rounded-full bg-primary" />
               Inferred: {{ DIR_LABEL[inferredDir] }}
             </span>
 
-            <button
+            <Button
               v-if="inferredDir && directionSource === 'user' && inferredDir !== direction"
               type="button"
-              class="rounded-[5px] border border-[#A7F3D0] bg-transparent px-2 py-0.5 text-[11px] font-medium text-primary"
+              variant="outline"
+              size="xs"
+              class="border-emerald-200 text-primary"
               @click="useSuggestion"
             >
               Use suggested: {{ DIR_LABEL[inferredDir] }}
-            </button>
+            </Button>
           </div>
-        </div>
+        </DialogHeader>
 
-        <!-- Body -->
-        <div class="flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-[18px]">
-          <div
-            v-if="toast"
-            class="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-[13px] text-emerald-800"
-          >
-            {{ toast }}
-          </div>
-
-          <div class="flex flex-wrap gap-1.5">
+        <div class="relative flex flex-1 flex-col gap-3.5 overflow-y-auto px-5 py-[18px]">
+<div class="flex flex-wrap gap-1.5">
             <span
               v-for="h in COMPLIANCE[direction]"
               :key="h"
@@ -540,7 +633,7 @@ function onNum(raw: string): number | null {
                     v-if="customer?.status === 'pending_approval'"
                     class="mt-1 text-[11px] text-amber-600"
                   >
-                    ⚠ Customer pending approval
+                    ? Customer pending approval
                   </div>
                 </label>
 
@@ -552,7 +645,7 @@ function onNum(raw: string): number | null {
                     storage-key="customer"
                     :options="masters.customers"
                     :frequent-values="frequentCustomerValues"
-                    placeholder="Search shipper…"
+                    placeholder="Search shipper"
                     :disabled="!canEdit"
                   />
                 </label>
@@ -565,7 +658,7 @@ function onNum(raw: string): number | null {
                     storage-key="customer"
                     :options="masters.customers"
                     :frequent-values="frequentCustomerValues"
-                    placeholder="Search consignee…"
+                    placeholder="Search consignee"
                     :disabled="!canEdit"
                   />
                 </label>
@@ -577,7 +670,7 @@ function onNum(raw: string): number | null {
                     class="mt-1"
                     storage-key="customer"
                     :options="masters.customers"
-                    placeholder="Optional…"
+                    placeholder="Optional"
                     :disabled="!canEdit"
                   />
                 </label>
@@ -770,7 +863,7 @@ function onNum(raw: string): number | null {
                 <input
                   v-model="commodity"
                   class="mt-1 h-9 w-full rounded-[7px] border border-[#E4E7EC] px-2.5 text-[13px] outline-none focus:border-primary"
-                  placeholder="e.g. Textiles, Electronics…"
+                  placeholder="e.g. Textiles, Electronics"
                   :disabled="!canEdit"
                 />
               </label>
@@ -788,7 +881,7 @@ function onNum(raw: string): number | null {
                 <input
                   v-model="dgClass"
                   class="mt-1 h-9 w-full rounded-[7px] border border-[#E4E7EC] px-2.5 text-[13px] outline-none focus:border-primary disabled:bg-[#F9FAFB]"
-                  :placeholder="isDangerousGoods ? 'Class 3…' : '—'"
+                  :placeholder="isDangerousGoods ? 'Class 3' : ''"
                   :disabled="!canEdit || !isDangerousGoods"
                 />
               </label>
@@ -864,7 +957,7 @@ function onNum(raw: string): number | null {
                 v-model="notes"
                 rows="2"
                 class="mt-1 w-full resize-y rounded-[7px] border border-[#E4E7EC] px-2.5 py-2 text-[13px] leading-relaxed outline-none focus:border-primary disabled:bg-[#F9FAFB]"
-                placeholder="Quote conditions, carrier preferences, special instructions…"
+                placeholder="Quote conditions, carrier preferences, special instructions"
                 :disabled="!canEdit"
               />
             </label>
@@ -887,11 +980,11 @@ function onNum(raw: string): number | null {
                 <span class="text-[11px] text-[#9CA3AF]">
                   {{ lines.length }} line{{ lines.length !== 1 ? 's' : '' }}
                   <template v-if="lines.some((l) => l.sell !== null)">
-                    · {{ lines.filter((l) => l.sell !== null).length }} priced
+                     {{ lines.filter((l) => l.sell !== null).length }} priced
                   </template>
                 </span>
               </div>
-              <span class="text-sm text-[#9CA3AF]">{{ ratesOpen ? '−' : '⊕' }}</span>
+              <span class="text-sm text-[#9CA3AF]">{{ ratesOpen ? '?' : '?' }}</span>
             </button>
 
             <div v-if="ratesOpen" class="pb-3">
@@ -977,7 +1070,7 @@ function onNum(raw: string): number | null {
                   class="border-0 bg-transparent p-0 text-base text-[#D1D5DB]"
                   @click="removeLine(line.id)"
                 >
-                  ×
+                  
                 </button>
                 <span v-else />
               </div>
@@ -1012,69 +1105,61 @@ function onNum(raw: string): number | null {
             </span>
           </div>
 
-          <button
+          <Button type="button" variant="outline" @click="requestClose">Cancel</Button>
+          <Button
             type="button"
-            class="rounded-lg border border-[#E4E7EC] bg-white px-4 py-1.5 text-[13px] font-medium text-[#374151]"
-            @click="requestClose"
-          >
-            Cancel
-          </button>
-          <button
-            type="button"
-            class="rounded-lg border border-[#E4E7EC] bg-white px-4 py-1.5 text-[13px] font-medium text-[#374151] disabled:opacity-50"
-            :disabled="saving || !canEdit"
+            variant="outline"
+            :disabled="saving || converting || !canEdit"
             @click="saveDraft"
           >
-            {{ saved ? '✓ Saved' : 'Save Draft' }}
-          </button>
-          <button
+            {{ saved ? t('quote.saved') : t('quote.saveDraft') }}
+          </Button>
+          <Button
             type="button"
-            class="rounded-lg px-5 py-1.5 text-[13px] font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60"
-            :class="!canEdit || progressScore < 3 ? 'bg-[#A7F3D0]' : 'bg-primary'"
-            :disabled="!canEdit || progressScore < 3 || saving"
+            variant="outline"
+            :disabled="!canEdit || progressScore < 3 || saving || converting"
             @click="sendQuote"
           >
-            Send Quote →
-          </button>
+            {{ t('quote.sendQuote') }}
+          </Button>
+          <Button
+            v-if="canConvertQuote"
+            type="button"
+            :disabled="!canEdit || !quoteComplete || saving || converting"
+            @click="convertToBooking"
+          >
+            {{ converting ? t('quote.converting') : t('quote.convert') }}
+          </Button>
+          <p
+            v-else-if="canEdit && quoteComplete"
+            class="self-center text-[11px] text-muted-foreground"
+          >
+            {{ convertBlockReason || t('quote.convertOpsOnly') }}
+          </p>
         </div>
 
-        <!-- Discard confirm -->
-        <template v-if="escConfirm">
-          <div class="absolute inset-0 z-10 rounded-[14px] bg-white/70" />
-          <div
-            class="absolute left-1/2 top-1/2 z-[11] min-w-[320px] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[#E4E7EC] bg-white px-8 py-7 text-center shadow-[0_8px_32px_rgba(0,0,0,0.12)]"
-          >
-            <div class="mb-1.5 text-[15px] font-semibold text-[#1F2937]">Discard this draft?</div>
-            <div class="mb-5 text-[13px] leading-relaxed text-[#6B7280]">
+        
+        <div v-if="escConfirm" class="absolute inset-0 z-10 flex items-center justify-center rounded-[14px] bg-background/70 p-4">
+          <div class="min-w-[320px] rounded-xl border border-border bg-card px-8 py-7 text-center shadow-lg">
+            <div class="mb-1.5 text-[15px] font-semibold">Discard this draft?</div>
+            <div class="mb-5 text-[13px] leading-relaxed text-muted-foreground">
               You have unsaved changes. Closing will discard your draft.
             </div>
             <div class="flex justify-center gap-2">
-              <button
-                type="button"
-                class="rounded-lg border border-[#E4E7EC] bg-white px-5 py-2 text-[13px] font-medium text-[#374151]"
-                @click="escConfirm = false"
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                class="rounded-lg bg-red-600 px-5 py-2 text-[13px] font-medium text-white"
-                @click="confirmDiscard"
-              >
-                Discard
-              </button>
+              <Button variant="outline" @click="escConfirm = false">Keep editing</Button>
+              <Button variant="destructive" @click="confirmDiscard">Discard</Button>
             </div>
           </div>
-        </template>
-      </div>
+        </div>
 
-      <QuickCreateCustomerDrawer
+    </DialogContent>
+  </Dialog>
+
+  <QuickCreateCustomerDrawer
         :open="createOpen"
         :initial-name="createSeed"
         :requested-by="actorName"
         @close="createOpen = false"
         @created="onCustomerCreated"
       />
-    </div>
-  </Teleport>
 </template>

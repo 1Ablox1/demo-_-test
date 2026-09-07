@@ -1,4 +1,13 @@
 import type { ActingRole, TaskItem } from '@/api/types'
+import {
+  canAccrueCharges,
+  canApproveCharges,
+  canConvertQuoteToBooking,
+  canCreateQuote,
+  canEditQuoteForm,
+  canIssueInvoice,
+} from '@/lib/rolePermissions'
+import { lobFromJobNo } from '@/lib/jobIdentity'
 import type {
   AllowedAction,
   GateStatus,
@@ -125,6 +134,7 @@ export function projectDeskTasks(life: JobLifecycle): TaskItem[] {
       priority: task.priority,
       title: task.title,
       shipmentId: life.shipmentId,
+      lob: lobFromJobNo(life.jobNo),
       jobNo: life.jobNo,
       pack: life.pack,
       roleMarks: task.roleMarks,
@@ -155,6 +165,7 @@ export function projectDeskTasks(life: JobLifecycle): TaskItem[] {
       priority: gate.holdType === 'docs' || gate.holdType === 'customs' ? 'critical' : 'high',
       title: gate.title,
       shipmentId: life.shipmentId,
+      lob: lobFromJobNo(life.jobNo),
       jobNo: life.jobNo,
       pack: life.pack,
       roleMarks: gate.roleMarks,
@@ -176,6 +187,8 @@ export function projectDeskTasks(life: JobLifecycle): TaskItem[] {
       trigger: gate.trigger,
       dataRequired: gate.dataRequired,
       output: gate.output,
+      holdType: gate.holdType === 'none' || gate.holdType === 'margin' ? undefined : gate.holdType,
+      gateTitle: gate.title,
     })
   }
 
@@ -232,11 +245,41 @@ export function computeAllowedActions(
     {
       id: 'create_quote',
       label: 'Create quote',
-      enabled: role === 'sales' || role === 'operations',
-      reason:
-        role === 'finance' || role === 'admin'
-          ? 'Only Sales or Operations (R) create quotes'
-          : undefined,
+      enabled: canCreateQuote(role),
+      reason: !canCreateQuote(role)
+        ? 'Only Sales or Operations (R) create quotes'
+        : undefined,
+    },
+    {
+      id: 'edit_quote',
+      label: 'Edit quote',
+      enabled: canEditQuoteForm(role, {
+        milestoneId: life.currentMilestoneId,
+        tasks: life.tasks,
+        gates: life.gates,
+      }),
+      reason: !canEditQuoteForm(role, {
+        milestoneId: life.currentMilestoneId,
+        tasks: life.tasks,
+        gates: life.gates,
+      })
+        ? 'Only Sales or Operations (R) edit quotes at this stage'
+        : undefined,
+    },
+    {
+      id: 'convert_quote',
+      label: 'Convert to booking',
+      enabled:
+        canConvertQuoteToBooking(role, {
+          milestoneId: life.currentMilestoneId,
+          tasks: life.tasks,
+        }) && life.currentMilestoneId === 'quote',
+      reason: !canConvertQuoteToBooking(role, {
+        milestoneId: life.currentMilestoneId,
+        tasks: life.tasks,
+      })
+        ? 'Operations (A/R) converts — Sales is Consulted'
+        : undefined,
     },
     {
       id: 'open_charges',
@@ -249,10 +292,9 @@ export function computeAllowedActions(
       label: 'Accrue charges',
       enabled:
         !moneyBlock.blocked &&
-        (role === 'operations' || role === 'admin') &&
-        life.currentMilestoneId !== 'quote',
+        canAccrueCharges(role, life.currentMilestoneId),
       reason:
-        role === 'finance' || role === 'sales'
+        !canAccrueCharges(role, life.currentMilestoneId)
           ? 'Ops (R) accrues'
           : moneyBlock.message,
     },
@@ -261,9 +303,9 @@ export function computeAllowedActions(
       label: 'Approve charges',
       enabled:
         !moneyBlock.blocked &&
-        (role === 'finance' || role === 'admin') &&
+        canApproveCharges(role) &&
         chargeGateClearedOrAbsent(life),
-      reason: role === 'operations' || role === 'sales' ? 'Finance (A) approves' : undefined,
+      reason: !canApproveCharges(role) ? 'Finance (A) approves' : undefined,
     },
     {
       id: 'open_invoice',
@@ -279,9 +321,9 @@ export function computeAllowedActions(
       label: 'Issue invoice',
       enabled:
         !invoiceBlockedByGates(life).blocked &&
-        (role === 'finance' || role === 'admin'),
+        canIssueInvoice(role),
       reason:
-        role === 'operations' || role === 'sales'
+        !canIssueInvoice(role)
           ? 'Finance issues'
           : invoiceBlockedByGates(life).reasons.join('; ') || undefined,
     },
@@ -291,7 +333,12 @@ export function computeAllowedActions(
 }
 
 function chargeGateClearedOrAbsent(life: JobLifecycle) {
-  const g = life.gates.find((x) => x.id === 'gate-charges-approve')
+  const g = life.gates.find(
+    (x) =>
+      x.id === 'gate-charges-approve' ||
+      x.id === 'gate-charges-4096' ||
+      (x.milestoneId === 'charges' && x.holdType === 'invoice'),
+  )
   return !g || g.status === 'cleared'
 }
 
@@ -308,20 +355,54 @@ export function clearGate(life: JobLifecycle, gateId: string): JobLifecycle {
     }
   }
 
-  // Advance current milestone if documents gates all clear
-  if (gateId.startsWith('gate-docs') || gateId.startsWith('gate-customs')) {
+  // Module 1: quote completeness cleared → Convert to booking becomes actionable
+  if (gateId === 'gate-quote-complete') {
+    for (const t of next.tasks) {
+      if (t.id.includes('convert') && t.status === 'blocked') {
+        t.status = 'open'
+      }
+    }
+  }
+
+  // Advance current milestone if documents gates all clear (incl. AU clearance)
+  if (
+    gateId.startsWith('gate-docs') ||
+    gateId.startsWith('gate-customs') ||
+    gateId === 'gate-au-clearance-held'
+  ) {
     const docsOpen = blockingGatesForMilestone(next, 'documents')
     if (docsOpen.length === 0 && next.currentMilestoneId === 'documents') {
       next.currentMilestoneId = 'charges'
     }
   }
 
-  if (gateId === 'gate-charges-approve') {
+  if (
+    gateId === 'gate-charges-approve' ||
+    gateId === 'gate-charges-4096' ||
+    gateId.startsWith('gate-charges')
+  ) {
     for (const t of next.tasks) {
-      if (t.id === 'task-approve-charges') t.status = 'done'
+      if (
+        t.id === 'task-approve-charges' ||
+        t.id === 'task-4096-approve-charges' ||
+        (t.milestoneId === 'charges' && t.id.includes('approve'))
+      ) {
+        t.status = 'done'
+      }
     }
     if (next.currentMilestoneId === 'charges') {
       next.currentMilestoneId = 'invoice'
+    }
+  }
+
+  if (gateId.startsWith('gate-invoice')) {
+    for (const t of next.tasks) {
+      if (t.milestoneId === 'invoice' && (t.id.includes('issue') || t.gateId === gateId)) {
+        t.status = 'done'
+      }
+    }
+    if (next.currentMilestoneId === 'invoice') {
+      next.currentMilestoneId = 'history'
     }
   }
 

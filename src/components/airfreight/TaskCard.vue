@@ -3,14 +3,13 @@ import { computed, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { RaciMark, TaskItem } from '@/api/types'
 import { awbDisplay } from '@/api/types'
-import Badge from '@/components/ui/Badge.vue'
-import Button from '@/components/ui/Button.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   actionLabelForTask,
   destinationForTask,
   destinationHintKey,
 } from '@/lib/navDestinations'
-import { useTasksStore } from '@/stores/tasks'
 
 const props = defineProps<{
   task: TaskItem
@@ -19,16 +18,11 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   action: [task: TaskItem]
-  exception: []
+  exception: [task: TaskItem]
 }>()
 
 const { t } = useI18n()
-const tasks = useTasksStore()
 const hovered = ref(false)
-
-const canCreateQuote = computed(
-  () => tasks.role === 'sales' || tasks.role === 'operations',
-)
 
 const priorityVariant = computed(() => {
   if (props.task.priority === 'critical') return 'critical'
@@ -46,7 +40,7 @@ const raciVariant = computed(() => {
 
 const cta = computed(() => actionLabelForTask(props.task, props.mark))
 const destHint = computed(() =>
-  t(destinationHintKey(destinationForTask(props.task, canCreateQuote.value))),
+  t(destinationHintKey(destinationForTask(props.task))),
 )
 
 const urgentCutoff = computed(() => {
@@ -91,7 +85,7 @@ const awbLine = computed(() => awbDisplay(props.task))
         v-if="task.nodeType === 'gate'"
         variant="gate"
         class="cursor-pointer"
-        @click="emit('exception')"
+        @click="emit('exception', task)"
       >
         {{ t('myTasks.nodeType.gate') }}
       </Badge>

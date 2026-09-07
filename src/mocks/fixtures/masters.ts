@@ -37,6 +37,13 @@ export const masterCustomers: MasterOption[] = [
     aliases: ['FedEx', 'FX'],
     meta: 'Customer · US',
   },
+  {
+    kind: 'customer',
+    label: 'Nova Pharma',
+    value: 'NOVA-PHARMA',
+    aliases: ['Nova', 'Nova Pharma AU', 'NovaPharma'],
+    meta: 'Customer · AU · Module 1 golden',
+  },
 ]
 
 export const masterCountries: MasterOption[] = [
@@ -120,6 +127,54 @@ export const masterAirports: MasterOption[] = [
     aliases: ['Frankfurt Main', 'EDDF'],
     meta: 'Germany',
   },
+  {
+    kind: 'airport',
+    label: 'Sydney Kingsford Smith',
+    value: 'SYD',
+    aliases: ['Sydney', 'YSSY', 'Kingsford'],
+    meta: 'Australia',
+  },
+]
+
+/** Module 1 AU Air Import demo lane (quote → 4096-class). */
+export const MODULE1_AI_LANE = {
+  origin: 'PVG',
+  dest: 'SYD',
+  currency: 'AUD',
+  airline: 'QF',
+  customer: 'NOVA-PHARMA',
+} as const
+
+/** Thin airline list for quote — not full legacy airline MDM. */
+export const masterAirlines: MasterOption[] = [
+  { kind: 'airline', label: 'Qantas', value: 'QF', aliases: ['Qantas Airways'], meta: 'Australia' },
+  { kind: 'airline', label: 'China Airlines', value: 'CI', aliases: ['CAL'], meta: 'Taiwan' },
+  { kind: 'airline', label: 'Cathay Pacific', value: 'CX', aliases: ['Cathay'], meta: 'Hong Kong' },
+  { kind: 'airline', label: 'Singapore Airlines', value: 'SQ', aliases: ['SIA'], meta: 'Singapore' },
+  { kind: 'airline', label: 'United Airlines', value: 'UA', aliases: ['United'], meta: 'United States' },
+  { kind: 'airline', label: 'Lufthansa', value: 'LH', aliases: ['DLH'], meta: 'Germany' },
+]
+
+/**
+ * Thin charge codes for AI quote / AF-05 — not full charge MDM.
+ * Sell/cost pairing stays on the job; Rating service later.
+ */
+export const masterChargeCodes: MasterOption[] = [
+  { kind: 'charge', label: 'Air Freight', value: 'FREIGHT', aliases: ['FRT', 'Airfreight'], meta: 'Per kg' },
+  { kind: 'charge', label: 'Fuel Surcharge', value: 'FSC', aliases: ['Fuel'], meta: 'Per kg' },
+  { kind: 'charge', label: 'Security Surcharge', value: 'SSC', aliases: ['Security'], meta: 'Per kg' },
+  { kind: 'charge', label: 'Destination Charges', value: 'DCH', aliases: ['Dest charges'], meta: 'Per shipment · AI' },
+  { kind: 'charge', label: 'Origin Charges', value: 'OCA', aliases: ['Origin'], meta: 'Per shipment' },
+  { kind: 'charge', label: 'Customs Clearance', value: 'CCL', aliases: ['Clearance'], meta: 'Per shipment · AU' },
+]
+
+export const masterCurrencies: MasterOption[] = [
+  { kind: 'currency', label: 'Australian Dollar', value: 'AUD', aliases: ['A$'] },
+  { kind: 'currency', label: 'US Dollar', value: 'USD', aliases: ['$'] },
+  { kind: 'currency', label: 'Euro', value: 'EUR', aliases: ['€'] },
+  { kind: 'currency', label: 'Chinese Yuan', value: 'CNY', aliases: ['RMB', '¥'] },
+  { kind: 'currency', label: 'Hong Kong Dollar', value: 'HKD', aliases: ['HK$'] },
+  { kind: 'currency', label: 'Singapore Dollar', value: 'SGD', aliases: ['S$'] },
 ]
 
 export const masterPorts: MasterOption[] = [
@@ -161,6 +216,6 @@ export const masterPorts: MasterOption[] = [
 ]
 
 /** Seed “frequently used” for high-frequency desks (mock). */
-export const frequentCustomerValues = ['DHL-SC', 'KN', 'MAERSK-L']
-export const frequentAirportValues = ['PVG', 'LAX', 'SIN']
+export const frequentCustomerValues = ['NOVA-PHARMA', 'DHL-SC', 'KN', 'MAERSK-L']
+export const frequentAirportValues = ['PVG', 'SYD', 'LAX', 'SIN']
 export const frequentCountryValues = ['US', 'CN', 'AU']

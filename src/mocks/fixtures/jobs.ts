@@ -1,10 +1,13 @@
 import type { JobContext } from '@/api/types'
+import { enrichJobContext } from './jobIdentities'
 
 /** L2 Job Context fixtures — manage-by-exception seeds with ops truth on face */
-export const jobContextByShipment: Record<number, JobContext> = {
+const jobContextSeeds: Record<number, JobContext> = {
   1024: {
     shipmentId: 1024,
     pack: 'GLOBAL',
+    activePacks: ['GLOBAL'],
+    homeCurrency: 'USD',
     compliance: {
       customs: 'ok',
       documents: 'warn',
@@ -31,8 +34,8 @@ export const jobContextByShipment: Record<number, JobContext> = {
       { label: 'Delivery', date: 'Pending', state: 'pending' },
     ],
     raci: {
-      responsible: 'Abdalla',
-      accountable: 'Operations Manager',
+      responsible: 'Sarah Jenkins',
+      accountable: 'Sarah Jenkins',
     },
     ops: {
       hawb: '180-58439211',
@@ -54,6 +57,8 @@ export const jobContextByShipment: Record<number, JobContext> = {
   2048: {
     shipmentId: 2048,
     pack: 'GLOBAL',
+    activePacks: ['GLOBAL'],
+    homeCurrency: 'USD',
     compliance: {
       customs: 'ok',
       documents: 'ok',
@@ -80,8 +85,8 @@ export const jobContextByShipment: Record<number, JobContext> = {
       { label: 'Invoice', date: 'Today', state: 'current' },
     ],
     raci: {
-      responsible: 'Echo',
-      accountable: 'Finance Lead',
+      responsible: 'Sarah Jenkins',
+      accountable: 'Marcello Vance',
     },
     ops: {
       hawb: '618-90221144',
@@ -105,6 +110,8 @@ export const jobContextByShipment: Record<number, JobContext> = {
   3056: {
     shipmentId: 3056,
     pack: 'US',
+    activePacks: ['GLOBAL', 'US'],
+    homeCurrency: 'USD',
     compliance: {
       customs: 'warn',
       documents: 'warn',
@@ -131,8 +138,8 @@ export const jobContextByShipment: Record<number, JobContext> = {
       { label: 'Delivery', date: 'Pending', state: 'pending' },
     ],
     raci: {
-      responsible: 'Jarod',
-      accountable: 'Operations Manager',
+      responsible: 'Sarah Jenkins',
+      accountable: 'Sarah Jenkins',
     },
     ops: {
       hawb: null,
@@ -153,16 +160,47 @@ export const jobContextByShipment: Record<number, JobContext> = {
   },
   4096: {
     shipmentId: 4096,
+    lob: 'AI',
     pack: 'AU',
+    activePacks: ['GLOBAL', 'AU'],
+    homeCurrency: 'AUD',
+    hostFacts: {
+      ownerName: 'Sydney Retail Group Pty Ltd',
+      ownerId: 'ABN pending MDM',
+      ownerContact: '+61 2 9000 1234 · import@sydneyretail.au',
+      ownerRef: 'SRG-IMP-2408',
+      incoTerm: 'CIF',
+      invoiceTotal: 'AUD 6,400',
+      overseasFreight: 'AUD 4,200',
+      insurance: 'AUD 180',
+      airlineCode: 'QF',
+      airlineName: 'Qantas',
+      loadingPort: 'PVG',
+      dischargingPort: 'SYD',
+      destinationPort: 'SYD',
+      firstArrivalDate: '2026-08-01',
+      marksAndNumbers: 'CARTON 1-6 · ELECTRONICS · MADE IN CN',
+      deliveryAddress: '12 George St, Sydney NSW 2000',
+      supplierName: 'Shanghai Components Co.',
+      declarationId: null,
+    },
+    clearance: {
+      provider: 'mock',
+      status: 'held',
+      blockers: [
+        { code: 'BIO', label: 'Biosecurity inspection pending' },
+      ],
+      note: 'AU pack — clearance held; Accrue / Invoice stay locked until Cleared.',
+    },
     compliance: {
-      customs: 'ok',
+      customs: 'warn',
       documents: 'ok',
-      invoice: 'ok',
+      invoice: 'warn',
     },
     summary: {
       customer: 'Sydney Retail Group',
       route: 'PVG → SYD',
-      status: 'Actuals posted',
+      status: 'Clearance held',
       priority: 'Medium',
     },
     documents: {
@@ -170,18 +208,18 @@ export const jobContextByShipment: Record<number, JobContext> = {
       total: 7,
       done: ['Customs declaration', 'Packing list', 'Commercial invoice', 'AWB'],
       missing: [],
-      impact: 'Variance review — accrued cost vs vendor invoices',
+      impact: 'AU clearance held — money locked until Cleared (mock chip).',
     },
-    nextAction: 'Review AP variance on air freight buy before job verify',
+    nextAction: 'Complete AU clearance checklist — Ops fulfil, Finance A stamp',
     timeline: [
       { label: 'Booking completed', date: '08 July', state: 'done' },
-      { label: 'Invoice issued', date: '18 July', state: 'done' },
-      { label: 'Vendor actuals', date: 'Today', state: 'current' },
+      { label: 'Clearance', date: 'Today', state: 'current' },
+      { label: 'Vendor actuals', date: 'Pending', state: 'pending' },
       { label: 'Job verify', date: 'Pending', state: 'pending' },
     ],
     raci: {
-      responsible: 'Finance Analyst',
-      accountable: 'Finance Lead',
+      responsible: 'Sarah Jenkins',
+      accountable: 'Marcello Vance',
     },
     ops: {
       hawb: '160-44112233',
@@ -190,29 +228,32 @@ export const jobContextByShipment: Record<number, JobContext> = {
       pieces: 6,
       grossWeightKg: 720,
       chargeableWeightKg: 800,
-      slaLabel: 'Variance review by 01 Aug',
-      sellAmount: 'USD 4,250',
-      costAmount: 'USD 3,520 actual',
-      moneyAtRisk: 'USD 170 cost overrun vs accrual',
-      marginPct: '17.2% → 17.2% actual GP lower',
-      provisionalGp: 'USD 900',
-      moneyState: 'actuals_posted',
+      slaLabel: 'Clearance before 01 Aug',
+      sellAmount: 'AUD 6,400',
+      costAmount: 'AUD 5,280',
+      moneyAtRisk: 'AUD 6,400 locked while clearance held',
+      marginPct: '17.5%',
+      provisionalGp: 'AUD 1,120',
+      moneyState: 'blocked',
       etdLabel: 'ETD flown',
       etaLabel: 'ETA delivered',
+      holdType: 'customs',
     },
   },
   8801: {
     shipmentId: 8801,
-    pack: 'GLOBAL',
+    pack: 'AU',
+    activePacks: ['AU', 'GLOBAL'],
+    homeCurrency: 'AUD',
     compliance: {
       customs: 'idle',
       documents: 'idle',
       invoice: 'idle',
     },
     summary: {
-      customer: 'New customer (draft)',
-      route: '—',
-      status: 'Draft quote',
+      customer: 'Nova Pharma (draft quote)',
+      route: 'PVG → SYD',
+      status: 'Draft AI quote',
       priority: 'Medium',
     },
     documents: {
@@ -220,22 +261,23 @@ export const jobContextByShipment: Record<number, JobContext> = {
       total: 0,
       done: [],
       missing: ['Quote data'],
-      impact: 'No job file until quote completes',
+      impact: 'No live AI job until quote converts to booking',
     },
-    nextAction: 'Create / complete quotation — weight and incoterm missing',
+    nextAction: 'Complete AU Air Import quote — then Convert to booking (4096-class)',
     timeline: [
       { label: 'RFQ received', date: 'Today', state: 'current' },
       { label: 'Quote confirm', date: 'Pending', state: 'pending' },
-      { label: 'Booking', date: 'Pending', state: 'pending' },
+      { label: 'Convert → booking', date: 'Pending', state: 'pending' },
+      { label: 'AU clearance', date: 'Pending', state: 'pending' },
     ],
     raci: {
-      responsible: 'Mia',
-      accountable: 'Sales Lead',
+      responsible: 'Alex Rivera',
+      accountable: 'Alex Rivera',
     },
     ops: {
       hawb: null,
       mawb: null,
-      airline: '—',
+      airline: 'QF',
       pieces: 0,
       grossWeightKg: 0,
       chargeableWeightKg: 0,
@@ -249,3 +291,7 @@ export const jobContextByShipment: Record<number, JobContext> = {
     },
   },
 }
+
+export const jobContextByShipment: Record<number, JobContext> = Object.fromEntries(
+  Object.entries(jobContextSeeds).map(([k, v]) => [Number(k), enrichJobContext(v)]),
+) as Record<number, JobContext>

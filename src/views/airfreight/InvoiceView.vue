@@ -2,10 +2,8 @@
 import { computed, onMounted, onUnmounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import AppShell from '@/components/airfreight/AppShell.vue'
-import JobNavStrip from '@/components/airfreight/JobNavStrip.vue'
-import Badge from '@/components/ui/Badge.vue'
-import Button from '@/components/ui/Button.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import type { InvoicePaymentChip, InvoiceState } from '@/api/types'
 import { useInvoiceStore } from '@/stores/invoice'
 
@@ -64,10 +62,7 @@ function paymentBadge(chip: InvoicePaymentChip) {
 </script>
 
 <template>
-  <AppShell>
-    <div class="mx-auto max-w-[960px] px-6 pb-12">
-      <JobNavStrip :shipment-id="shipmentId" current="invoice" />
-
+  <div class="flex flex-col pb-6">
       <div v-if="store.loading" class="text-sm text-muted-foreground">
         {{ t('invoice.loading') }}
       </div>
@@ -80,13 +75,6 @@ function paymentBadge(chip: InvoicePaymentChip) {
       </div>
 
       <template v-else-if="store.payload">
-        <div
-          v-if="store.toast"
-          class="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-[13px] text-emerald-800"
-        >
-          {{ store.toast }}
-        </div>
-
         <!-- Blocker banner -->
         <div
           v-if="store.blockersOpen.length"
@@ -257,6 +245,5 @@ function paymentBadge(chip: InvoicePaymentChip) {
 
         <p class="text-[11px] text-muted-foreground">{{ t('invoice.hint') }}</p>
       </template>
-    </div>
-  </AppShell>
+  </div>
 </template>

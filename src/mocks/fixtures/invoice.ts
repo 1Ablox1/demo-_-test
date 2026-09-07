@@ -1,4 +1,5 @@
 import type { InvoicePayload } from '@/api/types'
+import { legacyJobNoForShipment } from './jobIdentities'
 
 /**
  * AF-06 fixtures — one invoice surface (no domestic/international tabs).
@@ -91,12 +92,12 @@ export const invoiceByShipment: Record<number, InvoicePayload> = {
   4096: {
     shipmentId: 4096,
     jobNo: 'AF-4096',
-    state: 'part_paid',
+    state: 'draft',
     customer: 'Sydney Retail Group',
     lane: 'PVG → SYD',
     homeCurrency: 'AUD',
     fxToAud: 1.53,
-    settlementHint: 'Customer bill · partial receipt applied (mock)',
+    settlementHint: 'Customer bill · unlocks after AU clearance Cleared and Finance approve',
     lines: [
       {
         id: 'inv-4096-1',
@@ -119,13 +120,18 @@ export const invoiceByShipment: Record<number, InvoicePayload> = {
     taxAud: 0,
     totalAud: 6502.5,
     blockers: [
+      {
+        id: 'clearance',
+        label: 'AU import clearance held — biosecurity pending',
+        cleared: false,
+      },
       { id: 'docs', label: 'Docs / customs holds', cleared: true },
-      { id: 'charges', label: 'Charges approved', cleared: true },
+      { id: 'charges', label: 'Charges not approved by Finance', cleared: false },
       { id: 'awb', label: 'HAWB / MAWB on file', cleared: true },
     ],
-    paymentChip: 'part_paid',
-    invoiceNo: 'INV-AU-4096-01',
-    issuedAt: '2026-07-18',
+    paymentChip: 'blocked',
+    invoiceNo: null,
+    issuedAt: null,
     hawb: '160-44112233',
     mawb: '999-55443322',
   },
@@ -134,5 +140,8 @@ export const invoiceByShipment: Record<number, InvoicePayload> = {
 export function cloneInvoice(shipmentId: number): InvoicePayload | null {
   const seed = invoiceByShipment[shipmentId]
   if (!seed) return null
-  return structuredClone(seed)
+  const clone = structuredClone(seed)
+  const legacyNo = legacyJobNoForShipment(shipmentId)
+  if (legacyNo) clone.jobNo = legacyNo
+  return clone
 }

@@ -1,4 +1,5 @@
 import { defineStore } from 'pinia'
+import { toast as sonnerToast } from 'vue-sonner'
 import { computed, ref } from 'vue'
 import { approveCharges, accrueCharges, fetchCharges } from '@/api/client'
 import type { ChargeLine, ChargesPayload, JobMoneyState } from '@/api/types'
@@ -8,7 +9,11 @@ import {
   recomputeGp,
   toAud,
 } from '@/lib/chargesMoney'
+import { useAdminConfigStore } from '@/stores/adminConfig'
 import { useTasksStore } from '@/stores/tasks'
+import { chargesActionFromLifecycle } from '@/lib/allowedActionsBridge'
+import { useJobStore } from '@/stores/job'
+import { useLifecycleStore } from '@/stores/lifecycle'
 
 function stamp() {
   const d = new Date()
@@ -28,12 +33,13 @@ export const useChargesStore = defineStore('charges', () => {
   const loading = ref(false)
   const acting = ref(false)
   const error = ref<string | null>(null)
-  const toast = ref<string | null>(null)
   const payload = ref<ChargesPayload | null>(null)
   /** Lines that received +CAF on last CAF apply */
   const lastCafLineCodes = ref<string[]>([])
 
   const tasksStore = useTasksStore()
+  const lifecycleStore = useLifecycleStore()
+  const adminStore = useAdminConfigStore()
   const role = computed(() => tasksStore.role)
   const showAdvanced = ref(false)
   const viewMode = ref<'ledger' | 'list'>('ledger')
@@ -57,10 +63,21 @@ export const useChargesStore = defineStore('charges', () => {
     return POST_READY.includes(payload.value.moneyState)
   })
 
+  function lifecyclePermits(
+    chargeAction: 'accrue' | 'approve' | 'open_invoice',
+  ): boolean | null {
+    const sid = payload.value?.shipmentId
+    if (sid == null || lifecycleStore.lifecycle?.shipmentId !== sid) return null
+    return chargesActionFromLifecycle(lifecycleStore.allowedActions, chargeAction)
+  }
+
   const canAccrue = computed(() => {
     if (!payload.value || payload.value.blocked) return false
     if (!payload.value.allowedActions.includes('accrue')) return false
-    // Ops only — Admin is Finance-seat + overrides (not Ops entry)
+    if (!adminStore.raciEnforce) return role.value === 'operations'
+    const fromLife = lifecyclePermits('accrue')
+    if (fromLife === false) return false
+    if (fromLife === true) return true
     return role.value === 'operations'
   })
 
@@ -68,11 +85,21 @@ export const useChargesStore = defineStore('charges', () => {
     if (!payload.value || payload.value.blocked) return false
     if (!payload.value.allowedActions.includes('approve')) return false
     if (unresolvedVarianceCount.value > 0) return false
+    if (!adminStore.raciEnforce) {
+      return role.value === 'finance' || role.value === 'admin'
+    }
+    const fromLife = lifecyclePermits('approve')
+    if (fromLife === false) return false
+    if (fromLife === true) return true
     return role.value === 'finance' || role.value === 'admin'
   })
 
   const canOpenInvoice = computed(() => {
     if (!payload.value) return false
+    if (adminStore.raciEnforce) {
+      const fromLife = lifecyclePermits('open_invoice')
+      if (fromLife === false) return false
+    }
     return (
       payload.value.allowedActions.includes('open_invoice') ||
       payload.value.moneyState === 'charges_approved' ||
@@ -164,7 +191,6 @@ export const useChargesStore = defineStore('charges', () => {
   async function load(shipmentId: number) {
     loading.value = true
     error.value = null
-    toast.value = null
     lastCafLineCodes.value = []
     payload.value = null
     try {
@@ -213,10 +239,11 @@ export const useChargesStore = defineStore('charges', () => {
       .filter((l) => l.cafApplied)
       .map((l) => l.code)
     const n = lastCafLineCodes.value.length
-    toast.value =
+    sonnerToast.message(
       n > 0
         ? `CAF ${payload.value.cafPercent}% applied — +CAF on ${n} foreign AP line(s): ${lastCafLineCodes.value.join(', ')}`
-        : `CAF set to ${payload.value.cafPercent}% — no foreign AP lines`
+        : `CAF set to ${payload.value.cafPercent}% — no foreign AP lines`,
+    )
   }
 
   function setJobFx(rate: number) {
@@ -224,26 +251,28 @@ export const useChargesStore = defineStore('charges', () => {
     if (!Number.isFinite(rate) || rate <= 0) return
     payload.value.fxToAud = rate
     applyCafToLines(payload.value)
-    toast.value = `Job FX set to 1 foreign = ${rate} ${payload.value.homeCurrency} (Admin demo)`
+    sonnerToast.message(`Job FX set to 1 foreign = ${rate} ${payload.value.homeCurrency} (Admin demo)`)
   }
 
   function setVarianceThreshold(pct: number) {
     if (!payload.value || !canEditThreshold.value) return
     if (!Number.isFinite(pct) || pct < 0) return
     payload.value.varianceThresholdPct = pct
-    toast.value = `Variance gate set to ${pct}% (Admin)`
+    sonnerToast.message(`Variance gate set to ${pct}% (Admin)`)
   }
 
   function updateLineAmount(lineId: string, field: 'accrued' | 'actual', value: number) {
     if (!payload.value) return
     if (field === 'accrued' && !canEditAccrued.value) {
-      toast.value = accrualsLocked.value
-        ? 'Accruals locked after Finance Approve — switch role or reopen (not in mock)'
-        : 'Only Operations can edit accrued amounts'
+      sonnerToast.message(
+        accrualsLocked.value
+          ? 'Accruals locked after Finance Approve — switch role or reopen (not in mock)'
+          : 'Only Operations can edit accrued amounts',
+      )
       return
     }
     if (field === 'actual' && !canEditActual.value) {
-      toast.value = 'Only Finance (or Admin) can edit actuals'
+      sonnerToast.message('Only Finance (or Admin) can edit actuals')
       return
     }
     const line = payload.value.lines.find((l) => l.id === lineId)
@@ -281,13 +310,13 @@ export const useChargesStore = defineStore('charges', () => {
       applyCafToLines(payload.value)
     }
     payload.value.gp = recomputeGp(payload.value)
-    toast.value = field === 'accrued' ? 'Accrual updated' : 'Actual updated'
+    sonnerToast.message(field === 'accrued' ? 'Accrual updated' : 'Actual updated')
   }
 
   function clearVariance(lineId: string, note: string) {
     if (!payload.value || !note.trim()) return
     if (!canEditVarianceNote.value) {
-      toast.value = 'Only Finance (or Admin) can clear variance'
+      sonnerToast.message('Only Finance (or Admin) can clear variance')
       return
     }
     const line = payload.value.lines.find((l) => l.id === lineId)
@@ -295,7 +324,7 @@ export const useChargesStore = defineStore('charges', () => {
     line.varianceNote = note.trim()
     line.varianceCleared = true
     pushAudit(line, 'variance_approved', { note: line.varianceNote })
-    toast.value = 'Variance note saved — row cleared'
+    sonnerToast.message('Variance note saved — row cleared')
   }
 
   function postLine(lineId: string) {
@@ -303,7 +332,7 @@ export const useChargesStore = defineStore('charges', () => {
     const line = payload.value.lines.find((l) => l.id === lineId)
     if (!line || !canPostLine(line)) {
       if (!jobReadyToPost.value) {
-        toast.value = 'Post blocked — Finance must Approve charges first'
+        sonnerToast.message('Post blocked — Finance must Approve charges first')
       }
       return
     }
@@ -311,7 +340,7 @@ export const useChargesStore = defineStore('charges', () => {
     line.state = 'posted'
     pushAudit(line, 'posted', { amount: line.amount })
     payload.value.gp = recomputeGp(payload.value)
-    toast.value = 'Posted to GL (mock)'
+    sonnerToast.message('Posted to GL (mock)')
   }
 
   function addChargeLine() {
@@ -334,20 +363,24 @@ export const useChargesStore = defineStore('charges', () => {
       audit: [],
     })
     payload.value.gp = recomputeGp(payload.value)
-    toast.value = 'Stub AR line added — edit amount in Ledger (Ops) or switch role'
+    sonnerToast.message('Stub AR line added — edit amount in Ledger (Ops) or switch role')
   }
 
   async function accrue() {
     if (!payload.value || !canAccrue.value) return
     acting.value = true
-    toast.value = null
     try {
-      payload.value = await accrueCharges(payload.value.shipmentId)
+      const shipmentId = payload.value.shipmentId
+      payload.value = await accrueCharges(shipmentId)
       applyCafToLines(payload.value)
       for (const line of payload.value.lines) {
         if (line.state === 'accrued') pushAudit(line, 'accrual', { amount: line.amount })
       }
-      toast.value = 'Charges accrued — provisional GP frozen'
+      // Hugh spine: refresh Milestone → Gate → Task + job next action
+      await useLifecycleStore().load(shipmentId)
+      await useJobStore().load(shipmentId)
+      await useTasksStore().load()
+      sonnerToast.message('Charges accrued — provisional GP frozen')
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Accrue failed'
     } finally {
@@ -358,11 +391,14 @@ export const useChargesStore = defineStore('charges', () => {
   async function approve() {
     if (!payload.value || !canApprove.value) return
     acting.value = true
-    toast.value = null
     try {
-      payload.value = await approveCharges(payload.value.shipmentId)
+      const shipmentId = payload.value.shipmentId
+      payload.value = await approveCharges(shipmentId)
       applyCafToLines(payload.value)
-      toast.value = 'Charges approved — ready to post to GL / issue invoice'
+      await useLifecycleStore().load(shipmentId)
+      await useJobStore().load(shipmentId)
+      await useTasksStore().load()
+      sonnerToast.message('Charges approved — ready to post to GL / issue invoice')
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Approve failed'
     } finally {
@@ -373,19 +409,17 @@ export const useChargesStore = defineStore('charges', () => {
   function clear() {
     payload.value = null
     error.value = null
-    toast.value = null
-    lastCafLineCodes.value = []
+        lastCafLineCodes.value = []
   }
 
   function notify(message: string) {
-    toast.value = message
+    sonnerToast.message(message)
   }
 
   return {
     loading,
     acting,
     error,
-    toast,
     payload,
     role,
     canAccrue,

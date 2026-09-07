@@ -2,9 +2,21 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import AppShell from '@/components/airfreight/AppShell.vue'
-import JobNavStrip from '@/components/airfreight/JobNavStrip.vue'
-import Button from '@/components/ui/Button.vue'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from '@/components/ui/sheet'
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from '@/components/ui/tabs'
 import {
   buildUnifiedLedger,
   type LedgerFilter,
@@ -12,6 +24,7 @@ import {
 } from '@/lib/unifiedLedger'
 import { useChargesStore } from '@/stores/charges'
 import { useJobStore } from '@/stores/job'
+import { displayJobNo } from '@/lib/jobIdentity'
 
 type UiStatus = 'Draft' | 'Accrued' | 'Approved' | 'Posted' | 'Variance'
 type DrawerTab = 'ap' | 'ar' | 'audit'
@@ -119,7 +132,15 @@ const selectedRow = computed(
 
 const hasVariance = computed(() => chipCounts.value.variance > 0)
 
-const jobId = computed(() => store.payload?.jobNo ?? `AF-${shipmentId.value}`)
+const jobId = computed(() => {
+  if (store.payload?.jobNo?.trim()) return store.payload.jobNo.trim()
+  if (jobStore.job?.identity?.jobNo?.trim()) return jobStore.job.identity.jobNo.trim()
+  return displayJobNo({
+    identity: jobStore.job?.identity,
+    lob: jobStore.job?.lob,
+    shipmentId: shipmentId.value,
+  })
+})
 const hawb = computed(() => jobStore.job?.ops.hawb ?? null)
 const mawb = computed(() => jobStore.job?.ops.mawb ?? null)
 const customer = computed(
@@ -224,16 +245,7 @@ watch(selectedRow, (row) => {
 </script>
 
 <template>
-  <AppShell>
-    <div class="mx-auto flex max-w-[1200px] flex-col px-6 pb-10">
-      <JobNavStrip
-        :shipment-id="shipmentId"
-        current="charges"
-        class="mb-3"
-        :charges-locked="false"
-        :invoice-locked="store.payload?.blocked === true"
-      />
-
+  <div class="flex flex-col pb-6">
       <div v-if="store.loading" class="text-sm text-muted-foreground">
         {{ t('charges.loading') }}
       </div>
@@ -246,13 +258,6 @@ watch(selectedRow, (row) => {
       </div>
 
       <template v-else-if="store.payload">
-        <div
-          v-if="store.toast"
-          class="mb-3 rounded-lg border border-emerald-200 bg-emerald-50 px-3.5 py-2 text-[13px] text-emerald-800"
-        >
-          {{ store.toast }}
-        </div>
-
         <div
           v-if="store.payload.blocked"
           class="mb-3 rounded-lg border border-red-200 bg-red-50 px-3.5 py-2.5 text-[13px] text-red-800"
@@ -649,131 +654,118 @@ watch(selectedRow, (row) => {
           </div>
         </div>
       </template>
-    </div>
 
-    <!-- Slide-over -->
-    <Teleport to="body">
-      <div
-        class="fixed inset-0 z-[100] transition-colors"
-        :class="selectedRow ? 'pointer-events-auto bg-slate-900/20' : 'pointer-events-none bg-transparent'"
-        @click="closeDrawer"
-      />
-      <aside
-        class="fixed bottom-0 right-0 top-0 z-[101] flex w-[min(100vw,420px)] flex-col border-l border-[#E4E7EC] bg-white shadow-[-8px_0_32px_rgba(0,0,0,0.08)] transition-transform duration-200"
-        :class="selectedRow ? 'translate-x-0' : 'translate-x-full'"
-        @click.stop
+    <!-- Charge line sheet -->
+    <Sheet :open="!!selectedRow" @update:open="(v) => !v && closeDrawer()">
+      <SheetContent
+        side="right"
+        class="flex w-full flex-col gap-0 p-0 sm:max-w-[420px]"
+        :show-close-button="true"
       >
         <template v-if="selectedRow">
-          <div class="shrink-0 border-b border-[#E4E7EC] px-[18px] pt-3.5">
-            <div class="mb-2.5 flex items-center gap-2">
-              <span
-                class="rounded bg-[#F3F4F6] px-2 py-0.5 font-mono text-[13px] font-bold text-[#1F2937]"
-              >
-                {{ selectedRow.code }}
-              </span>
-              <span class="min-w-0 flex-1 truncate text-sm font-semibold text-[#1F2937]">
-                {{ selectedRow.label }}
-              </span>
-              <span
-                class="rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
-                :class="statusClass(rowStatus(selectedRow))"
-              >
-                {{ rowStatus(selectedRow).toUpperCase() }}
-              </span>
-              <button
-                type="button"
-                class="flex h-[26px] w-[26px] items-center justify-center rounded-md border border-[#E4E7EC] text-base text-[#6B7280]"
-                @click="closeDrawer"
-              >
-                ×
-              </button>
-            </div>
-            <div class="flex">
-              <button
-                v-for="tab in ([
-                  { id: 'ap', label: 'AP · Cost' },
-                  { id: 'ar', label: 'AR · Sell' },
-                  { id: 'audit', label: 'Audit' },
-                ] as const)"
-                :key="tab.id"
-                type="button"
-                class="border-b-2 px-3.5 py-1.5 text-xs font-medium transition"
-                :class="
-                  drawerTab === tab.id
-                    ? 'border-primary text-primary'
-                    : 'border-transparent text-[#6B7280]'
-                "
-                @click="drawerTab = tab.id"
-              >
-                {{ tab.label }}
+          <Tabs v-model="drawerTab" class="flex min-h-0 flex-1 flex-col">
+            <SheetHeader class="space-y-0 border-b border-border px-[18px] pt-3.5 text-left">
+              <div class="mb-2.5 flex items-center gap-2 pr-8">
                 <span
-                  v-if="tab.id === 'audit'"
-                  class="ml-1 text-[10px] text-[#6B7280]"
+                  class="rounded bg-muted px-2 py-0.5 font-mono text-[13px] font-bold text-foreground"
                 >
-                  {{
-                    (selectedRow.ap?.audit?.length ?? 0) + (selectedRow.ar?.audit?.length ?? 0)
-                  }}
+                  {{ selectedRow.code }}
                 </span>
-              </button>
-            </div>
-          </div>
+                <SheetTitle class="min-w-0 flex-1 truncate text-sm font-semibold">
+                  {{ selectedRow.label }}
+                </SheetTitle>
+                <span
+                  class="rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
+                  :class="statusClass(rowStatus(selectedRow))"
+                >
+                  {{ rowStatus(selectedRow).toUpperCase() }}
+                </span>
+              </div>
+              <TabsList
+                variant="line"
+                class="h-auto w-full justify-start gap-0 rounded-none bg-transparent p-0"
+              >
+                <TabsTrigger
+                  value="ap"
+                  class="rounded-none border-b-2 border-transparent px-3.5 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:shadow-none"
+                >
+                  AP · Cost
+                </TabsTrigger>
+                <TabsTrigger
+                  value="ar"
+                  class="rounded-none border-b-2 border-transparent px-3.5 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:shadow-none"
+                >
+                  AR · Sell
+                </TabsTrigger>
+                <TabsTrigger
+                  value="audit"
+                  class="rounded-none border-b-2 border-transparent px-3.5 py-1.5 text-xs data-[state=active]:border-primary data-[state=active]:shadow-none"
+                >
+                  Audit
+                  <span class="ml-1 text-[10px] text-muted-foreground">
+                    {{
+                      (selectedRow.ap?.audit?.length ?? 0) + (selectedRow.ar?.audit?.length ?? 0)
+                    }}
+                  </span>
+                </TabsTrigger>
+              </TabsList>
+            </SheetHeader>
 
-          <div class="flex-1 overflow-y-auto px-[18px] py-4">
-            <!-- AP tab -->
-            <div v-if="drawerTab === 'ap'" class="flex flex-col gap-4">
+            <div class="flex-1 overflow-y-auto px-[18px] py-4">
+              <TabsContent value="ap" class="mt-0 flex flex-col gap-4">
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                  class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   Vendor / Supplier
                 </div>
                 <div class="flex flex-col gap-2">
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Supplier
-                    <input
-                      class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] bg-[#F9FAFB] px-2.5 text-[13px]"
-                      :value="selectedRow.ap?.partyName ?? '—'"
+                  <div class="space-y-1">
+                    <Label class="text-[11px] text-muted-foreground">Supplier</Label>
+                    <Input
+                      class="h-[34px] bg-muted/40"
+                      :model-value="selectedRow.ap?.partyName ?? '—'"
                       readonly
                     />
-                  </label>
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Currency
-                    <input
-                      class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] bg-[#F9FAFB] px-2.5 text-[13px]"
-                      :value="selectedRow.ap?.currency ?? selectedRow.currency"
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-[11px] text-muted-foreground">Currency</Label>
+                    <Input
+                      class="h-[34px] bg-muted/40"
+                      :model-value="selectedRow.ap?.currency ?? selectedRow.currency"
                       readonly
                     />
-                  </label>
+                  </div>
                 </div>
               </div>
 
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                  class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   Accrued vs Actual
                 </div>
                 <div class="grid grid-cols-2 gap-2">
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Accrued Amount
-                    <input
+                  <div class="space-y-1">
+                    <Label class="text-[11px] text-muted-foreground">Accrued Amount</Label>
+                    <Input
                       type="number"
-                      class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] px-2.5 text-[13px] outline-none focus:border-primary disabled:bg-[#F9FAFB]"
-                      :value="selectedRow.ap?.baseAmount ?? selectedRow.ap?.amount ?? ''"
+                      class="h-[34px]"
+                      :model-value="selectedRow.ap?.baseAmount ?? selectedRow.ap?.amount ?? ''"
                       :disabled="!store.canEditAccrued || !selectedRow.ap"
                       @change="commitApAccrued(($event.target as HTMLInputElement).value)"
                     />
-                  </label>
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Actual Amount
-                    <input
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-[11px] text-muted-foreground">Actual Amount</Label>
+                    <Input
                       type="number"
-                      class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] px-2.5 text-[13px] outline-none focus:border-primary disabled:bg-[#F9FAFB]"
-                      :value="selectedRow.ap?.actualAmount ?? ''"
+                      class="h-[34px]"
+                      :model-value="selectedRow.ap?.actualAmount ?? ''"
                       :disabled="!store.canEditActual || !selectedRow.ap"
                       @change="commitApActual(($event.target as HTMLInputElement).value)"
                     />
-                  </label>
+                  </div>
                 </div>
 
                 <div
@@ -785,19 +777,16 @@ watch(selectedRow, (row) => {
                   {{ (selectedRow.costVariance ?? 0) > 0 ? 'over' : 'under' }} accrual
                 </div>
 
-                <div
-                  v-if="isFinanceSeat && selectedRow.varianceFlagged"
-                  class="mt-2"
-                >
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Variance Note <span class="text-red-600">*</span>
-                    <textarea
-                      v-model="varianceNote"
-                      rows="3"
-                      class="mt-1 w-full rounded-[7px] border border-[#E4E7EC] px-2.5 py-2 text-[13px] outline-none focus:border-primary"
-                      placeholder="Required before approval — explain the variance cause…"
-                    />
-                  </label>
+                <div v-if="isFinanceSeat && selectedRow.varianceFlagged" class="mt-2 space-y-1">
+                  <Label class="text-[11px] text-muted-foreground">
+                    Variance Note <span class="text-destructive">*</span>
+                  </Label>
+                  <textarea
+                    v-model="varianceNote"
+                    rows="3"
+                    class="mt-1 w-full rounded-lg border border-input bg-transparent px-2.5 py-2 text-[13px] outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50"
+                    placeholder="Required before approval — explain the variance cause…"
+                  />
                   <Button
                     size="sm"
                     class="mt-2"
@@ -811,11 +800,11 @@ watch(selectedRow, (row) => {
 
               <div v-if="selectedRow.ap?.cafApplied">
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                  class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   CAF Breakdown
                 </div>
-                <div class="rounded-[7px] bg-[#F9FAFB] px-3 py-2.5 text-xs text-[#374151]">
+                <div class="rounded-[7px] bg-muted/50 px-3 py-2.5 text-xs text-foreground">
                   <div class="flex justify-between py-0.5">
                     <span>Base</span>
                     <span>{{ money(selectedRow.ap.baseAmount, selectedRow.currency) }}</span>
@@ -825,7 +814,7 @@ watch(selectedRow, (row) => {
                     <span>+CAF applied</span>
                   </div>
                   <div
-                    class="mt-1 flex justify-between border-t border-[#E4E7EC] pt-1 font-semibold text-[#1F2937]"
+                    class="mt-1 flex justify-between border-t border-border pt-1 font-semibold"
                   >
                     <span>Total AP</span>
                     <span>{{ money(selectedRow.apAmount, selectedRow.currency) }}</span>
@@ -840,73 +829,72 @@ watch(selectedRow, (row) => {
               >
                 {{ t('charges.post.action') }}
               </Button>
-            </div>
+              </TabsContent>
 
-            <!-- AR tab -->
-            <div v-else-if="drawerTab === 'ar'" class="flex flex-col gap-4">
+              <TabsContent value="ar" class="mt-0 flex flex-col gap-4">
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                  class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   Customer / Bill-To
                 </div>
                 <div class="flex flex-col gap-2">
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Bill-To Party
-                    <input
-                      class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] bg-[#F9FAFB] px-2.5 text-[13px]"
-                      :value="selectedRow.ar?.partyName ?? '—'"
+                  <div class="space-y-1">
+                    <Label class="text-[11px] text-muted-foreground">Bill-To Party</Label>
+                    <Input
+                      class="h-[34px] bg-muted/40"
+                      :model-value="selectedRow.ar?.partyName ?? '—'"
                       readonly
                     />
-                  </label>
-                  <label class="text-[11px] font-medium text-[#6B7280]">
-                    Rate Basis
-                    <input
-                      class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] bg-[#F9FAFB] px-2.5 text-[13px]"
-                      :value="selectedRow.ar?.ratingBasis ?? '—'"
+                  </div>
+                  <div class="space-y-1">
+                    <Label class="text-[11px] text-muted-foreground">Rate Basis</Label>
+                    <Input
+                      class="h-[34px] bg-muted/40"
+                      :model-value="selectedRow.ar?.ratingBasis ?? '—'"
                       readonly
                     />
-                  </label>
+                  </div>
                 </div>
               </div>
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                  class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   Sell Amount
                 </div>
-                <label class="text-[11px] font-medium text-[#6B7280]">
-                  Sell Amount
-                  <input
+                <div class="space-y-1">
+                  <Label class="text-[11px] text-muted-foreground">Sell Amount</Label>
+                  <Input
                     type="number"
-                    class="mt-1 h-[34px] w-full rounded-[7px] border border-[#E4E7EC] px-2.5 text-[13px] outline-none focus:border-primary disabled:bg-[#F9FAFB]"
-                    :value="selectedRow.ar?.amount ?? ''"
+                    class="h-[34px]"
+                    :model-value="selectedRow.ar?.amount ?? ''"
                     :disabled="!store.canEditAccrued || !selectedRow.ar || financeReadOnlyAmounts"
                     @change="commitArSell(($event.target as HTMLInputElement).value)"
                   />
-                </label>
+                </div>
               </div>
               <div>
                 <div
-                  class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                  class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
                 >
                   Margin Summary
                 </div>
-                <div class="rounded-[7px] bg-[#F9FAFB] px-3 py-2.5 text-xs">
-                  <div class="flex justify-between py-0.5 text-[#374151]">
+                <div class="rounded-[7px] bg-muted/50 px-3 py-2.5 text-xs">
+                  <div class="flex justify-between py-0.5 text-foreground/80">
                     <span>AR Sell</span>
                     <span>{{ money(selectedRow.arAmount, selectedRow.currency) }}</span>
                   </div>
-                  <div class="flex justify-between py-0.5 text-[#374151]">
+                  <div class="flex justify-between py-0.5 text-foreground/80">
                     <span>AP Cost</span>
                     <span>{{ money(selectedRow.apAmount, selectedRow.currency) }}</span>
                   </div>
                   <div
-                    class="mt-1 flex justify-between border-t border-[#E4E7EC] pt-1 font-semibold"
+                    class="mt-1 flex justify-between border-t border-border pt-1 font-semibold"
                     :class="
                       (selectedRow.marginPct ?? 100) < (store.payload?.varianceThresholdPct ?? 15)
                         ? 'text-amber-600'
-                        : 'text-[#1F2937]'
+                        : 'text-foreground'
                     "
                   >
                     <span
@@ -927,12 +915,11 @@ watch(selectedRow, (row) => {
                   </div>
                 </div>
               </div>
-            </div>
+              </TabsContent>
 
-            <!-- Audit -->
-            <div v-else>
+              <TabsContent value="audit" class="mt-0">
               <div
-                class="mb-2.5 border-b border-[#F3F4F6] pb-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6B7280]"
+                class="mb-2.5 border-b border-border pb-1.5 text-[10px] font-bold uppercase tracking-wider text-muted-foreground"
               >
                 Change History
               </div>
@@ -954,35 +941,34 @@ watch(selectedRow, (row) => {
                         (selectedRow.ar?.audit?.length ?? 0) -
                         1
                     "
-                    class="min-h-6 w-px flex-1 bg-[#E4E7EC]"
+                    class="min-h-6 w-px flex-1 bg-border"
                   />
                 </div>
                 <div class="pb-3.5">
                   <div class="mb-0.5 flex items-baseline gap-1.5">
-                    <span class="text-xs font-semibold text-[#1F2937]">{{ entry.by }}</span>
-                    <span class="text-[10px] text-[#6B7280]">{{ entry.at }}</span>
+                    <span class="text-xs font-semibold text-foreground">{{ entry.by }}</span>
+                    <span class="text-[10px] text-muted-foreground">{{ entry.at }}</span>
                   </div>
-                  <div class="text-xs text-[#374151]">{{ entry.kind }}</div>
+                  <div class="text-xs text-foreground/80">{{ entry.kind }}</div>
                   <div
                     v-if="entry.note"
-                    class="mt-1 rounded-[5px] border border-[#E4E7EC] bg-[#F9FAFB] px-2 py-1 text-[11px] text-[#6B7280]"
+                    class="mt-1 rounded-[5px] border border-border bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground"
                   >
                     {{ entry.note }}
                   </div>
                 </div>
               </div>
               <div
-                v-if="
-                  !(selectedRow.ap?.audit?.length || selectedRow.ar?.audit?.length)
-                "
+                v-if="!(selectedRow.ap?.audit?.length || selectedRow.ar?.audit?.length)"
                 class="text-[12px] text-muted-foreground"
               >
                 No audit events yet.
               </div>
+              </TabsContent>
             </div>
-          </div>
+          </Tabs>
         </template>
-      </aside>
-    </Teleport>
-  </AppShell>
+      </SheetContent>
+    </Sheet>
+  </div>
 </template>

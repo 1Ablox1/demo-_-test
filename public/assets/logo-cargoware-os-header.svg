@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 40" fill="none" role="img" aria-label="WALTECH CargoWare OS">
+  <!-- Header lockup: icon colors preserved; WAL navy-blue, TECH teal, product white -->
+  <g transform="translate(0, 2)">
+    <rect x="0" y="0" width="11" height="11" rx="2.5" fill="#35B8B3"/>
+    <rect x="14" y="0" width="11" height="11" rx="2.5" fill="#35B8B3" opacity="0.72"/>
+    <rect x="28" y="0" width="11" height="11" rx="2.5" fill="#3974C8" opacity="0.85"/>
+    <rect x="0" y="14" width="11" height="11" rx="2.5" fill="#35B8B3" opacity="0.55"/>
+    <rect x="14" y="14" width="11" height="11" rx="2.5" fill="#3974C8" opacity="0.65"/>
+    <rect x="28" y="14" width="11" height="11" rx="2.5" fill="#3974C8"/>
+    <rect x="7" y="28" width="11" height="8" rx="2.5" fill="#35B8B3" opacity="0.4"/>
+    <rect x="21" y="28" width="11" height="8" rx="2.5" fill="#3974C8" opacity="0.5"/>
+    <path stroke="#35B8B3" stroke-opacity="0.35" stroke-width="0.75" d="M11 5.5h3M25 5.5h3M5.5 11v3M19.5 11v3M33.5 11v3"/>
+    <path stroke="#3974C8" stroke-opacity="0.35" stroke-width="0.75" d="M5.5 25v3M19.5 25v3M33.5 25v3"/>
+  </g>
+  <text x="48" y="14" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="8" font-weight="700" letter-spacing="0.14em">
+    <tspan fill="#1e3a8a">WAL</tspan><tspan fill="#35B8B3">TECH</tspan>
+  </text>
+  <text x="48" y="32" font-family="Inter, ui-sans-serif, system-ui, sans-serif" font-size="15" font-weight="700" fill="#FFFFFF" letter-spacing="-0.02em">CargoWare OS</text>
+</svg>

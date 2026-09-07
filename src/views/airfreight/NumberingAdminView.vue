@@ -3,8 +3,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import AppShell from '@/components/airfreight/AppShell.vue'
-import Badge from '@/components/ui/Badge.vue'
-import Button from '@/components/ui/Button.vue'
+import { Badge } from '@/components/ui/badge'
+import { Button } from '@/components/ui/button'
 import {
   allocateMawb,
   fetchMawbAirlines,

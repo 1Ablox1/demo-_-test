@@ -2,6 +2,8 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
+import { Lock } from '@lucide/vue'
+import { displayJobNo } from '@/lib/jobIdentity'
 import { cn } from '@/lib/utils'
 
 export type JobNavPage = 'overview' | 'timeline' | 'charges' | 'invoice' | 'quote'
@@ -10,6 +12,8 @@ export type JobNavGlow = 'timeline' | null
 const props = withDefaults(
   defineProps<{
     shipmentId: number | string
+    /** Legacy JOB_NO — prefer over shipmentId display */
+    jobNo?: string
     current: JobNavPage
     class?: string
     compact?: boolean
@@ -35,6 +39,12 @@ const { t } = useI18n()
 const router = useRouter()
 
 const id = computed(() => String(props.shipmentId))
+
+const breadcrumbJobNo = computed(() =>
+  props.jobNo?.trim()
+    ? props.jobNo.trim()
+    : displayJobNo({ shipmentId: props.shipmentId }),
+)
 
 const items = computed(() => [
   {
@@ -98,7 +108,7 @@ function onTabClick(item: (typeof items.value)[number]) {
         ← {{ t('nav.pages.desk') }}
       </button>
       <span class="text-zinc-300">/</span>
-      <span class="font-mono text-[12px] font-semibold">AF-{{ shipmentId }}</span>
+      <span class="font-mono text-[12px] font-semibold">{{ breadcrumbJobNo }}</span>
       <span class="hidden text-[11px] text-muted-foreground sm:inline">· {{ t('nav.youAreHere') }}</span>
     </div>
 
@@ -167,19 +177,13 @@ function onTabClick(item: (typeof items.value)[number]) {
             {{ t('nav.osBadge') }}
           </span>
 
-          <!-- Lock -->
-          <svg
+          <Lock
             v-if="item.locked"
-            class="h-3 w-3 shrink-0 text-zinc-400"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
+            :size="12"
+            :stroke-width="2"
+            class="shrink-0 text-zinc-400"
             aria-hidden="true"
-          >
-            <rect x="5" y="11" width="14" height="10" rx="2" />
-            <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-          </svg>
+          />
         </span>
 
         <span

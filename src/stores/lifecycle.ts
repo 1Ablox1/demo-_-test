@@ -5,7 +5,9 @@ import {
   completeJobTask,
   fetchJobLifecycle,
 } from '@/api/client'
+import type { AllowedActionsSource } from '@/lib/allowedActionsBridge'
 import type { AllowedAction, JobLifecycle, MilestoneView } from '@/os/types'
+import { useJobStore } from '@/stores/job'
 import { useTasksStore } from '@/stores/tasks'
 
 export const useLifecycleStore = defineStore('lifecycle', () => {
@@ -14,6 +16,7 @@ export const useLifecycleStore = defineStore('lifecycle', () => {
   const lifecycle = ref<JobLifecycle | null>(null)
   const milestones = ref<MilestoneView[]>([])
   const allowedActions = ref<AllowedAction[]>([])
+  const allowedActionsSource = ref<AllowedActionsSource>('msw')
   const moneyBlock = ref<{ blocked: boolean; message?: string } | null>(null)
 
   const tasksStore = useTasksStore()
@@ -34,10 +37,17 @@ export const useLifecycleStore = defineStore('lifecycle', () => {
       lifecycle.value = data.lifecycle
       milestones.value = data.milestones
       allowedActions.value = data.allowedActions
+      allowedActionsSource.value = data.allowedActionsSource ?? 'msw'
       moneyBlock.value = data.moneyBlock
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to load lifecycle'
-      lifecycle.value = null
+      if (lifecycle.value?.shipmentId !== shipmentId) {
+        lifecycle.value = null
+        milestones.value = []
+        allowedActions.value = []
+        allowedActionsSource.value = 'msw'
+        moneyBlock.value = null
+      }
     } finally {
       loading.value = false
     }
@@ -45,26 +55,31 @@ export const useLifecycleStore = defineStore('lifecycle', () => {
 
   async function clearGate(gateId: string) {
     if (!lifecycle.value) return
-    const data = await clearJobGate(lifecycle.value.shipmentId, gateId)
+    const shipmentId = lifecycle.value.shipmentId
+    const data = await clearJobGate(shipmentId, gateId)
     lifecycle.value = data.lifecycle
     milestones.value = data.milestones
-    await load(lifecycle.value.shipmentId)
+    await load(shipmentId)
     await tasksStore.load()
+    await useJobStore().load(shipmentId)
   }
 
   async function completeTask(taskId: string) {
     if (!lifecycle.value) return
-    const data = await completeJobTask(lifecycle.value.shipmentId, taskId)
+    const shipmentId = lifecycle.value.shipmentId
+    const data = await completeJobTask(shipmentId, taskId)
     lifecycle.value = data.lifecycle
     milestones.value = data.milestones
-    await load(lifecycle.value.shipmentId)
+    await load(shipmentId)
     await tasksStore.load()
+    await useJobStore().load(shipmentId)
   }
 
   function clear() {
     lifecycle.value = null
     milestones.value = []
     allowedActions.value = []
+    allowedActionsSource.value = 'msw'
     moneyBlock.value = null
     error.value = null
   }
@@ -75,6 +90,7 @@ export const useLifecycleStore = defineStore('lifecycle', () => {
     lifecycle,
     milestones,
     allowedActions,
+    allowedActionsSource,
     moneyBlock,
     openGates,
     openTasks,

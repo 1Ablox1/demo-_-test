@@ -5,23 +5,40 @@ export type RaciMark = 'R' | 'A' | 'C' | 'I'
 export type DeskQueue = 'myTasks' | 'myApprovals' | 'myWatch'
 export type NodeType = 'task' | 'gate'
 export type ComplianceLight = 'ok' | 'warn' | 'idle'
+export type HoldType = 'customs' | 'docs' | 'invoice'
+
+/** Line of business — drives mandatory job-number prefix (AE / AI / SE / SI / RE / RI). */
+export type LineOfBusiness =
+  | 'air_export'
+  | 'air_import'
+  | 'sea_export'
+  | 'sea_import'
+  | 'road_export'
+  | 'road_import'
 
 export interface TaskItem {
   id: string
   priority: TaskPriority
   title: string
   shipmentId: number
-  /** Monospace job / file id shown on desk (e.g. AF-1024) */
+  /** LOB slug for desk — derive from identity.lob when API provides identity */
+  lob: LineOfBusiness
+  /** Display job number — must match legacy `identity.jobNo` when wired */
   jobNo: string
   pack: MarketPack
+  /** Pack version label for inspector (e.g. US Pack v1.8.0) */
+  packVersion?: string
   /** Per acting-role mark — drives OsDeskVO queues */
   roleMarks: Record<ActingRole, RaciMark>
   nodeType: NodeType
   responsible: string
+  /** Desk role title for Responsible (inspector) */
+  responsibleTitle?: string
   accountable?: string
+  accountableTitle?: string
   /** Legacy soft due — prefer cutoffLabel for desk */
   dueLabel: string
-  /** Freight why with deadline impact */
+  /** Short why / task reason shown as single truncated line on desk */
   why: string
   /** House AWB — null/empty → show No AWB */
   hawb: string | null
@@ -29,9 +46,15 @@ export interface TaskItem {
   mawb: string | null
   lane: string
   customer: string
-  /** Docs / AES / GST cutoff or ETD clock label */
+  /** Full cutoff sentence; desk shows parsed target + short label */
   cutoffLabel: string
+  /** Short cutoff kind for dense table (e.g. Docs Cutoff) */
+  cutoffKind?: string
+  /** Bold target clock for dense table (e.g. 28 Jul 14:00) */
+  cutoffAt?: string
   etdLabel: string
+  etaLabel?: string
+  flightLabel?: string
   /** Freight-language primary CTA when mark is R */
   primaryCta: string
   /** Freight-language CTA when mark is A (Approvals desk) */
@@ -39,9 +62,72 @@ export interface TaskItem {
   /** OS lifecycle projection (Hugh M-G-T) */
   milestoneId?: string
   gateId?: string
+  /** Active gate title for inspector */
+  gateTitle?: string
+  /** Market-pack regulatory reason for inspector */
+  regulatoryReason?: string
+  /** Money / lifecycle actions blocked by the gate */
+  blockedActions?: string[]
   trigger?: string
   dataRequired?: string[]
   output?: string
+  /** Freight hold chip on Needs You (gates / clearance) */
+  holdType?: HoldType
+  /** Money-risk chip (variance, unsigned charges, GP gate) */
+  moneyRisk?: boolean
+  /**
+   * Hugh A still open on this gate/task — money / compliance / release stamp.
+   * Prefer deriving from pack rulebook; fixtures may set explicitly.
+   */
+  approvalGate?: TaskApprovalGate
+  /** One-step next desk after this item clears (usually next R) */
+  nextHandoff?: TaskNextHandoff
+  /** Gate fulfil checklist (Ops R items + auto-verified) */
+  gateChecklist?: GateChecklistItem[]
+}
+
+/** Single checklist row on an open gate */
+export interface GateChecklistItem {
+  itemCode: string
+  itemName: string
+  met: boolean
+  metBy?: string
+  metAt?: string
+  /** Who must fulfil — auto = system verified at gate open */
+  fulfilRole?: 'operations' | 'finance' | 'auto'
+}
+
+/** GET /jobs/:id/gates/:gateId — checklist + stamp readiness */
+export interface GateDetailPayload {
+  gateId: string
+  title: string
+  status: 'open' | 'cleared'
+  items: GateChecklistItem[]
+  canStamp: boolean
+  approvalRequired: boolean
+  approverSeat?: string
+  approverName?: string
+}
+
+/** Open Accountable stamp before the job may proceed */
+export interface TaskApprovalGate {
+  open: boolean
+  /** Seat / role title (Hugh-stable) */
+  approverSeat: string
+  /** Optional person name */
+  approverName?: string
+  /** Plain-language reason (pack / rulebook) */
+  reason: string
+}
+
+/** Next desk recipient after current step clears */
+export interface TaskNextHandoff {
+  taskTitle: string
+  /** Seat / role title */
+  seat: string
+  personName?: string
+  /** Who that next desk cares about — usually R */
+  mark: 'R' | 'A'
 }
 
 export interface WorkboardJob {
@@ -95,8 +181,6 @@ export interface JobRaci {
   responsible: string
   accountable: string
 }
-
-export type HoldType = 'customs' | 'docs' | 'invoice'
 
 export type JobMoneyState =
   | 'open_wip'
@@ -262,9 +346,75 @@ export interface InvoicePayload {
   mawb: string | null
 }
 
+export type JobClearanceStatus =
+  | 'not_started'
+  | 'in_progress'
+  | 'held'
+  | 'cleared'
+
+/** AU Local Frame clearance chip — mock/manual; not N10 form */
+export interface JobClearance {
+  provider: 'mock' | 'manual' | 'ctrlx'
+  status: JobClearanceStatus
+  blockers?: Array<{ code: string; label: string }>
+  note?: string
+  externalRef?: string | null
+}
+
+/** Legacy-backed operate fields (Bucket A) — adapter maps from booking */
+export interface JobHostFacts {
+  ownerName?: string
+  ownerId?: string
+  ownerContact?: string
+  ownerRef?: string
+  incoTerm?: string
+  invoiceTotal?: string
+  overseasFreight?: string
+  insurance?: string
+  airlineCode?: string
+  airlineName?: string
+  loadingPort?: string
+  dischargingPort?: string
+  destinationPort?: string
+  /** ISO date — ETA or ATA from legacy */
+  firstArrivalDate?: string
+  marksAndNumbers?: string
+  deliveryAddress?: string
+  supplierName?: string
+  declarationId?: string | null
+}
+
+export type JobLob = 'AE' | 'AI' | 'SE' | 'SI' | 'RE' | 'RI'
+
+/** Legacy / Echo identity block — source of truth for display jobNo (JOB_NO). */
+export interface JobIdentity {
+  /** OS or legacy UUID — primary key at wire time */
+  jobId: string
+  /** Human-readable number from legacy `JOB_NO` — always prefer for UI display */
+  jobNo: string
+  lob: JobLob
+  mbl?: string | null
+  hbl?: string | null
+}
+
 export interface JobContext {
   shipmentId: number
+  /** Legacy-shaped identity — required on API responses; MSW enriches from fixtures */
+  identity?: JobIdentity
+  /** Line of business — drives essentials visibility for AI import */
+  lob?: JobLob
   pack: MarketPack
+  /**
+   * Enabled packs for this job (tenant Required ∪ corridor).
+   * Operator sees read-only badges — never a toolbar country picker.
+   */
+  activePacks?: MarketPack[]
+  /** Home currency hint from pack/branch (AU→AUD) */
+  homeCurrency?: 'AUD' | 'USD'
+  /** AU import clearance chip (Local Frame) */
+  clearance?: JobClearance
+  /** Operate/host facts from legacy (read-only in OS) */
+  hostFacts?: JobHostFacts
   compliance: JobCompliance
   summary: JobSummary
   documents: JobDocuments

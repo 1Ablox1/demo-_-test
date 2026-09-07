@@ -1,14 +1,16 @@
 import { defineStore } from 'pinia'
+import { toast as sonnerToast } from 'vue-sonner'
 import { computed, ref } from 'vue'
 import { fetchInvoice, issueInvoice, markInvoicePaid } from '@/api/client'
 import type { InvoicePayload } from '@/api/types'
 import { useTasksStore } from '@/stores/tasks'
+import { useLifecycleStore } from '@/stores/lifecycle'
+import { useJobStore } from '@/stores/job'
 
 export const useInvoiceStore = defineStore('invoice', () => {
   const loading = ref(false)
   const acting = ref(false)
   const error = ref<string | null>(null)
-  const toast = ref<string | null>(null)
   const payload = ref<InvoicePayload | null>(null)
 
   const tasksStore = useTasksStore()
@@ -31,10 +33,15 @@ export const useInvoiceStore = defineStore('invoice', () => {
     return role.value === 'finance' || role.value === 'admin'
   })
 
+  async function refreshSpine(shipmentId: number) {
+    await useLifecycleStore().load(shipmentId)
+    await useJobStore().load(shipmentId)
+    await tasksStore.load()
+  }
+
   async function load(shipmentId: number) {
     loading.value = true
     error.value = null
-    toast.value = null
     payload.value = null
     try {
       payload.value = await fetchInvoice(shipmentId)
@@ -49,8 +56,10 @@ export const useInvoiceStore = defineStore('invoice', () => {
     if (!payload.value || !canIssue.value) return
     acting.value = true
     try {
-      payload.value = await issueInvoice(payload.value.shipmentId)
-      toast.value = `Invoice ${payload.value.invoiceNo} issued`
+      const shipmentId = payload.value.shipmentId
+      payload.value = await issueInvoice(shipmentId)
+      await refreshSpine(shipmentId)
+      sonnerToast.message(`Invoice ${payload.value.invoiceNo} issued`)
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Issue failed'
     } finally {
@@ -62,8 +71,10 @@ export const useInvoiceStore = defineStore('invoice', () => {
     if (!payload.value || !canMarkPaid.value) return
     acting.value = true
     try {
-      payload.value = await markInvoicePaid(payload.value.shipmentId)
-      toast.value = 'Payment recorded (mock)'
+      const shipmentId = payload.value.shipmentId
+      payload.value = await markInvoicePaid(shipmentId)
+      await refreshSpine(shipmentId)
+      sonnerToast.message('Payment recorded (mock)')
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Payment update failed'
     } finally {
@@ -74,14 +85,12 @@ export const useInvoiceStore = defineStore('invoice', () => {
   function clear() {
     payload.value = null
     error.value = null
-    toast.value = null
   }
 
   return {
     loading,
     acting,
     error,
-    toast,
     payload,
     role,
     blockersOpen,

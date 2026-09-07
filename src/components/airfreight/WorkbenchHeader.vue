@@ -2,7 +2,7 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { ActingRole, MarketPack, MyTasksSummary } from '@/api/types'
-import Badge from '@/components/ui/Badge.vue'
+import { Badge } from '@/components/ui/badge'
 
 const props = defineProps<{
   role: ActingRole

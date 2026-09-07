@@ -9,11 +9,11 @@ export type NavDestination =
   | 'mdm-approve'
   | 'none'
 
-export function destinationForTask(task: TaskItem, canCreateQuote = true): NavDestination {
+export function destinationForTask(task: TaskItem): NavDestination {
   if (task.id.startsWith('mdm-approve-')) return 'mdm-approve'
   const cta = `${task.primaryCta} ${task.approveCta ?? ''}`.toLowerCase()
   if (cta.includes('create quote') || task.shipmentId === 8801) {
-    return canCreateQuote ? 'create-quote' : 'job-context'
+    return 'create-quote'
   }
   if (cta.includes('charge') || cta.includes('accrual') || cta.includes('ledger')) {
     return 'job-charges'

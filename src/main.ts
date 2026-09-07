@@ -3,10 +3,16 @@ import { createPinia } from 'pinia'
 import App from './App.vue'
 import { i18n } from './locales'
 import { router } from './router'
+import { bindTenantToMarketPacks, useTenantAdminStore } from '@/stores/tenantAdmin'
+import { useMarketPackStore } from '@/stores/marketPacks'
+import { useThemeStore } from '@/stores/theme'
+import { shouldStartMsw } from '@/api/client'
+import { usesEchoReads } from '@/api/config'
+import { useAuthStore } from '@/stores/auth'
 import './style.css'
 
 async function prepareMocks() {
-  if (import.meta.env.VITE_API_MODE !== 'mock') return
+  if (!shouldStartMsw()) return
   const { worker } = await import('./mocks/browser')
   await worker.start({
     onUnhandledRequest: 'bypass',
@@ -15,10 +21,26 @@ async function prepareMocks() {
 }
 
 async function bootstrap() {
+  const app = createApp(App)
+  const pinia = createPinia()
+  app.use(pinia)
+
   await prepareMocks()
 
-  const app = createApp(App)
-  app.use(createPinia())
+  if (usesEchoReads()) {
+    const auth = useAuthStore()
+    try {
+      await auth.ensureSession()
+    } catch (err) {
+      // Echo down — still mount; hybrid falls back to MSW where wired
+      console.warn('[bootstrap] Echo session unavailable; continuing without control-plane auth', err)
+    }
+  }
+
+  const tenant = useTenantAdminStore()
+  bindTenantToMarketPacks(tenant, useMarketPackStore())
+  useThemeStore()
+  i18n.global.locale.value = tenant.defaultLocale
   app.use(router)
   app.use(i18n)
   app.mount('#app')

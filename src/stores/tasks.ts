@@ -4,14 +4,15 @@ import { fetchMyTasks } from '@/api/client'
 import type {
   ActingRole,
   DeskQueue,
-  MarketPack,
   MyTasksPayload,
   RaciMark,
   TaskItem,
   WorkboardJob,
 } from '@/api/types'
 import { queueForMark } from '@/api/types'
+import { filterTasksByQuery } from '@/lib/searchIndex'
 import { useMastersStore } from '@/stores/masters'
+import { useOsSearchStore } from '@/stores/osSearch'
 
 function pendingCustomerApprovals(): TaskItem[] {
   const masters = useMastersStore()
@@ -20,8 +21,10 @@ function pendingCustomerApprovals(): TaskItem[] {
     priority: 'high' as const,
     title: `Approve new customer · ${c.label}`,
     shipmentId: 8801,
+    lob: 'air_export' as const,
     jobNo: 'MDM-DRAFT',
     pack: 'GLOBAL' as const,
+    packVersion: 'GLOBAL Pack v1.4.2',
     roleMarks: {
       operations: 'I' as const,
       sales: 'C' as const,
@@ -29,27 +32,43 @@ function pendingCustomerApprovals(): TaskItem[] {
       admin: 'A' as const,
     },
     nodeType: 'task' as const,
-    responsible: c.requestedBy ?? 'Sales',
-    accountable: 'Finance',
+    responsible: c.requestedBy ?? 'Alex Rivera',
+    responsibleTitle: 'Pricing',
+    accountable: 'Marcello Vance',
+    accountableTitle: 'Finance',
     dueLabel: 'Credit / master activation',
-    why: 'Quick-created on quote — pending Finance (A) before Active in MDM',
+    why: 'Approve new customer for MDM',
     hawb: null,
     mawb: null,
     lane: '—',
     customer: c.label,
     cutoffLabel: 'Approve to activate',
+    cutoffKind: 'MDM Approve',
+    cutoffAt: 'ASAP',
     etdLabel: '—',
     primaryCta: 'Review customer',
     approveCta: 'Approve customer',
+    milestoneId: 'quote',
     trigger: 'In-flow quick create',
     dataRequired: ['Company name', 'Country', 'Partner role(s)', 'Contact', 'Credit posture'],
     output: 'Customer Active in catalog (adapter → mdm-service)',
+    approvalGate: {
+      open: true,
+      approverSeat: 'Finance',
+      approverName: 'Marcello Vance',
+      reason: 'New customer credit / master activation — Finance A must approve before catalog use.',
+    },
+    nextHandoff: {
+      taskTitle: 'Complete quote weight / FOB',
+      seat: 'Sales',
+      personName: 'Alex Rivera',
+      mark: 'R',
+    },
   }))
 }
 
 export const useTasksStore = defineStore('tasks', () => {
   const role = ref<ActingRole>('operations')
-  const activePack = ref<MarketPack>('GLOBAL')
   const activeQueue = ref<DeskQueue>('myTasks')
   const loading = ref(false)
   const error = ref<string | null>(null)
@@ -67,13 +86,14 @@ export const useTasksStore = defineStore('tasks', () => {
     return task.roleMarks[role.value]
   }
 
-  function packMatch(task: TaskItem) {
-    if (activePack.value === 'GLOBAL') return true
-    return task.pack === activePack.value
-  }
+  const allDeskTasks = computed(() =>
+    [...(payload.value?.tasks ?? []), ...pendingCustomerApprovals()],
+  )
 
-  const packFiltered = computed(() =>
-    [...(payload.value?.tasks ?? []), ...pendingCustomerApprovals()].filter(packMatch),
+  const deskFilterQuery = computed(() => useOsSearchStore().deskFilter)
+
+  const filteredTasks = computed(() =>
+    filterTasksByQuery(allDeskTasks.value, deskFilterQuery.value),
   )
 
   const desk = computed(() => {
@@ -81,7 +101,7 @@ export const useTasksStore = defineStore('tasks', () => {
     const myApprovals: TaskItem[] = []
     const myWatch: TaskItem[] = []
 
-    for (const task of packFiltered.value) {
+    for (const task of filteredTasks.value) {
       const mark = markFor(task)
       const queue = queueForMark(mark)
       if (queue === 'myTasks') myTasks.push(task)
@@ -100,6 +120,8 @@ export const useTasksStore = defineStore('tasks', () => {
 
   const visibleTasks = computed(() => desk.value[activeQueue.value])
 
+  const tasks = computed(() => filteredTasks.value)
+
   async function load() {
     loading.value = true
     error.value = null
@@ -115,7 +137,6 @@ export const useTasksStore = defineStore('tasks', () => {
 
   return {
     role,
-    activePack,
     activeQueue,
     loading,
     error,
@@ -124,6 +145,8 @@ export const useTasksStore = defineStore('tasks', () => {
     desk,
     queueCounts,
     visibleTasks,
+    tasks,
+    allDeskTasks,
     markFor,
     load,
   }
