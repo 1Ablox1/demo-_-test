@@ -486,12 +486,14 @@ function clearSort() {
 <style scoped>
 .ex-ag-grid {
   position: relative;
-  --ag-font-family: inherit;
+  --ag-font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
   --ag-font-size: 12px;
   --ag-border-color: #e2e8f0;
   --ag-header-background-color: #f8fafc;
   --ag-row-hover-color: #ccfbf1;
   --ag-selected-row-background-color: #99f6e4;
+  font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
+  font-size: 12px;
 }
 .ex-ag-grid :deep(.ag-root-wrapper) {
   border-radius: 8px;
@@ -501,7 +503,21 @@ function clearSort() {
   cursor: pointer;
 }
 .ex-ag-grid :deep(.ag-header-cell-label) {
-  font-weight: 700;
+  font-weight: 600;
+  overflow: visible;
+}
+.ex-ag-grid :deep(.ag-header-cell-text) {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  line-height: 1.25;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.ex-ag-grid :deep(.ag-cell) {
+  font-size: 12px;
+  font-weight: 400;
 }
 .ex-ag-grid.h-drag-scroll :deep(.ag-center-cols-viewport),
 .ex-ag-grid.h-drag-scroll :deep(.ag-body-viewport) {

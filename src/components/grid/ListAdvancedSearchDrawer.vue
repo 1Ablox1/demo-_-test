@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, Pin, PinOff, Sparkles, X } from '@lucide/vue'
+import { ChevronDown, ChevronRight, GripVertical, Pin, PinOff, Sparkles, X } from '@lucide/vue'
 import CompactField from '@/components/ui/CompactField.vue'
 import CompactSelect from '@/components/ui/CompactSelect.vue'
 import type { GridField, GridFieldGroup, GridFieldGroupMeta } from '@/data/gridFieldTypes'
@@ -9,6 +9,8 @@ import {
   savePinnedCriteriaIds,
   suggestedPinsFor,
 } from '@/lib/advancedSearchPins'
+
+const DND_MIME = 'application/x-cw-adv-field'
 
 const props = defineProps<{
   open: boolean
@@ -38,6 +40,8 @@ const draft = ref<Record<string, string>>(emptyFromFields(props.fields))
 const expanded = ref<Set<GridFieldGroup>>(new Set())
 const pinnedIds = ref<string[]>([])
 const pinNotice = ref('')
+const dropActive = ref(false)
+const draggingFieldId = ref<string | null>(null)
 
 const suggested = computed(() => {
   const allowed = new Set(props.fields.map((f) => f.id))
@@ -56,6 +60,8 @@ watch(
       )
       pinnedIds.value = loaded
       pinNotice.value = ''
+      dropActive.value = false
+      draggingFieldId.value = null
     }
   },
 )
@@ -120,15 +126,27 @@ function persistPins(ids: string[], notice: string) {
   }, 1800)
 }
 
-function togglePin(id: string) {
+function unpin(id: string) {
+  persistPins(
+    pinnedIds.value.filter((x) => x !== id),
+    'Removed from pinned · saved',
+  )
+}
+
+function pinField(id: string, atIndex?: number) {
+  if (!fieldById.value.has(id)) return
   if (isPinned(id)) {
-    persistPins(
-      pinnedIds.value.filter((x) => x !== id),
-      'Pin removed · saved',
-    )
-  } else {
-    persistPins([...pinnedIds.value, id], 'Pinned · saved as your default')
+    if (atIndex == null) return
+    const without = pinnedIds.value.filter((x) => x !== id)
+    const next = [...without]
+    next.splice(Math.min(atIndex, next.length), 0, id)
+    persistPins(next, 'Pinned order updated · saved')
+    return
   }
+  const next = [...pinnedIds.value]
+  if (atIndex == null || atIndex >= next.length) next.push(id)
+  else next.splice(atIndex, 0, id)
+  persistPins(next, 'Pinned · saved as your default')
 }
 
 function useSuggestedPins() {
@@ -137,6 +155,81 @@ function useSuggestedPins() {
 
 function clearPins() {
   persistPins([], 'Pins cleared')
+}
+
+function onCatalogDragStart(e: DragEvent, id: string) {
+  if (isPinned(id)) {
+    e.preventDefault()
+    return
+  }
+  draggingFieldId.value = id
+  e.dataTransfer?.setData(DND_MIME, id)
+  e.dataTransfer?.setData('text/plain', id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'copyMove'
+}
+
+function onPinnedDragStart(e: DragEvent, id: string) {
+  draggingFieldId.value = id
+  e.dataTransfer?.setData(DND_MIME, id)
+  e.dataTransfer?.setData('text/plain', id)
+  if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move'
+}
+
+function onDragEnd() {
+  draggingFieldId.value = null
+  dropActive.value = false
+}
+
+function onPinZoneDragOver(e: DragEvent) {
+  if (!e.dataTransfer?.types.includes(DND_MIME) && !e.dataTransfer?.types.includes('text/plain')) {
+    return
+  }
+  e.preventDefault()
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'copy'
+  dropActive.value = true
+}
+
+function onPinZoneDragLeave(e: DragEvent) {
+  const related = e.relatedTarget as Node | null
+  const current = e.currentTarget as HTMLElement
+  if (related && current.contains(related)) return
+  dropActive.value = false
+}
+
+function readDragFieldId(e: DragEvent): string | null {
+  const raw = e.dataTransfer?.getData(DND_MIME) || e.dataTransfer?.getData('text/plain') || ''
+  return raw.trim() || draggingFieldId.value
+}
+
+function onPinZoneDrop(e: DragEvent) {
+  e.preventDefault()
+  dropActive.value = false
+  const id = readDragFieldId(e)
+  draggingFieldId.value = null
+  if (!id) return
+  pinField(id)
+}
+
+function onPinnedItemDragOver(e: DragEvent, overId: string) {
+  if (!e.dataTransfer?.types.includes(DND_MIME) && !e.dataTransfer?.types.includes('text/plain')) {
+    return
+  }
+  e.preventDefault()
+  e.stopPropagation()
+  dropActive.value = true
+  if (e.dataTransfer) e.dataTransfer.dropEffect = 'move'
+  void overId
+}
+
+function onPinnedItemDrop(e: DragEvent, overId: string) {
+  e.preventDefault()
+  e.stopPropagation()
+  dropActive.value = false
+  const id = readDragFieldId(e)
+  draggingFieldId.value = null
+  if (!id) return
+  const at = pinnedIds.value.indexOf(overId)
+  pinField(id, at < 0 ? undefined : at)
 }
 
 function apply() {
@@ -183,7 +276,9 @@ function clearAll() {
 
         <div class="flex items-center justify-between gap-2 border-b border-slate-100 px-4 py-1.5">
           <p v-if="pinNotice" class="text-[11px] font-medium text-teal-700">{{ pinNotice }}</p>
-          <span v-else class="text-[11px] text-slate-400">Pin everyday fields · saved per workspace</span>
+          <span v-else class="text-[11px] text-slate-400">
+            Drag fields into Pinned criteria · saved per workspace
+          </span>
           <div class="flex shrink-0 items-center gap-2">
             <button
               type="button"
@@ -204,8 +299,18 @@ function clearAll() {
         </div>
 
         <div class="min-h-0 flex-1 space-y-3 overflow-y-auto p-4">
-          <!-- Pinned criteria (refined "default selection") -->
-          <section class="overflow-hidden rounded-xl border-2 border-teal-200 bg-teal-50/40">
+          <!-- Pinned criteria drop zone -->
+          <section
+            class="overflow-hidden rounded-xl border-2 border-dashed transition-colors"
+            :class="
+              dropActive
+                ? 'border-teal-500 bg-teal-100/70 ring-2 ring-teal-300/60'
+                : 'border-teal-200 bg-teal-50/40'
+            "
+            @dragover="onPinZoneDragOver"
+            @dragleave="onPinZoneDragLeave"
+            @drop="onPinZoneDrop"
+          >
             <div class="flex flex-wrap items-start justify-between gap-2 border-b border-teal-100 px-3 py-2.5">
               <div class="min-w-0">
                 <h3 class="flex items-center gap-1.5 text-[12px] font-bold uppercase tracking-wide text-teal-900">
@@ -213,7 +318,7 @@ function clearAll() {
                   Pinned criteria
                 </h3>
                 <p class="mt-0.5 text-[11px] text-teal-800/80">
-                  Your everyday filters — always on top. Star fields below to pin them.
+                  Drop fields here for everyday filters — always on top.
                 </p>
               </div>
               <div class="flex flex-wrap items-center gap-2">
@@ -239,15 +344,34 @@ function clearAll() {
             </div>
 
             <div v-if="pinnedFields.length" class="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2">
-              <div v-for="field in pinnedFields" :key="field.id" class="relative">
-                <button
-                  type="button"
-                  class="absolute right-1 top-0 z-10 rounded p-0.5 text-teal-700 hover:bg-teal-100"
-                  :title="`Unpin ${field.label}`"
-                  @click="togglePin(field.id)"
-                >
-                  <Pin :size="12" fill="currentColor" />
-                </button>
+              <div
+                v-for="field in pinnedFields"
+                :key="field.id"
+                class="relative rounded-md border border-teal-100 bg-white/80 p-1"
+                :class="draggingFieldId === field.id ? 'opacity-50' : ''"
+                draggable="true"
+                @dragstart="onPinnedDragStart($event, field.id)"
+                @dragend="onDragEnd"
+                @dragover="onPinnedItemDragOver($event, field.id)"
+                @drop="onPinnedItemDrop($event, field.id)"
+              >
+                <div class="mb-1 flex items-center gap-1 px-0.5">
+                  <span
+                    class="inline-flex cursor-grab text-teal-600 active:cursor-grabbing"
+                    title="Drag to reorder"
+                    aria-hidden="true"
+                  >
+                    <GripVertical :size="14" />
+                  </span>
+                  <button
+                    type="button"
+                    class="ml-auto rounded p-0.5 text-teal-700 hover:bg-teal-100"
+                    :title="`Remove ${field.label} from pinned`"
+                    @click="unpin(field.id)"
+                  >
+                    <X :size="12" />
+                  </button>
+                </div>
                 <CompactSelect
                   v-if="field.searchType === 'select' && field.searchOptions"
                   v-model="draft[field.id]"
@@ -265,10 +389,10 @@ function clearAll() {
               </div>
             </div>
 
-            <div v-else class="px-3 py-6 text-center">
-              <p class="text-[12px] font-medium text-slate-600">No pinned fields yet</p>
+            <div v-else class="px-3 py-8 text-center">
+              <p class="text-[12px] font-medium text-slate-600">Drop fields here</p>
               <p class="mt-1 text-[11px] text-slate-500">
-                Expand a group below and click the pin on fields you use most.
+                Expand a group below and drag a field into this box.
               </p>
               <button
                 v-if="suggested.length"
@@ -283,7 +407,7 @@ function clearAll() {
           </section>
 
           <p class="px-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-400">
-            All fields
+            All fields — drag into pinned
           </p>
 
           <section
@@ -309,33 +433,43 @@ function clearAll() {
 
             <div
               v-show="isOpen(g.id)"
-              class="grid grid-cols-1 gap-2 border-t border-slate-100 bg-white p-3 sm:grid-cols-2"
+              class="grid grid-cols-1 gap-1.5 border-t border-slate-100 bg-white p-2 sm:grid-cols-2"
             >
-              <div v-for="field in g.fields" :key="field.id" class="relative">
-                <button
-                  type="button"
-                  class="absolute right-1 top-0 z-10 rounded p-0.5 hover:bg-slate-100"
-                  :class="isPinned(field.id) ? 'text-teal-700' : 'text-slate-300'"
-                  :title="isPinned(field.id) ? 'Unpin from criteria' : 'Pin to top'"
-                  @click="togglePin(field.id)"
+              <button
+                v-for="field in g.fields"
+                :key="field.id"
+                type="button"
+                class="flex items-center gap-2 rounded-md border px-2 py-2 text-left transition-colors"
+                :class="
+                  isPinned(field.id)
+                    ? 'cursor-default border-teal-100 bg-teal-50/50 text-teal-800'
+                    : draggingFieldId === field.id
+                      ? 'cursor-grabbing border-teal-300 bg-teal-50 opacity-60'
+                      : 'cursor-grab border-slate-200 bg-white hover:border-teal-300 hover:bg-slate-50 active:cursor-grabbing'
+                "
+                :draggable="!isPinned(field.id)"
+                :title="
+                  isPinned(field.id)
+                    ? 'Already in pinned criteria'
+                    : `Drag “${field.label}” into Pinned criteria`
+                "
+                @dragstart="onCatalogDragStart($event, field.id)"
+                @dragend="onDragEnd"
+              >
+                <GripVertical
+                  :size="14"
+                  class="shrink-0"
+                  :class="isPinned(field.id) ? 'text-teal-400' : 'text-slate-400'"
+                  aria-hidden="true"
+                />
+                <span class="min-w-0 flex-1 truncate text-[12px] font-medium">{{ field.label }}</span>
+                <span
+                  v-if="isPinned(field.id)"
+                  class="shrink-0 rounded bg-teal-100 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide text-teal-800"
                 >
-                  <Pin :size="12" :fill="isPinned(field.id) ? 'currentColor' : 'none'" />
-                </button>
-                <CompactSelect
-                  v-if="field.searchType === 'select' && field.searchOptions"
-                  v-model="draft[field.id]"
-                  :label="field.label"
-                  hint="Any"
-                  :options="field.searchOptions"
-                />
-                <CompactField
-                  v-else
-                  v-model="draft[field.id]"
-                  :label="field.label"
-                  :hint="exampleFor(field)"
-                  :mono="field.mono"
-                />
-              </div>
+                  Pinned
+                </span>
+              </button>
             </div>
           </section>
         </div>

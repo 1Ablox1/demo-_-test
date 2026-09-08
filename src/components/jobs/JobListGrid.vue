@@ -16,7 +16,7 @@ import {
   type SelectionChangedEvent,
   type SortChangedEvent,
 } from 'ag-grid-community'
-import { Columns3, Filter, Search, SlidersHorizontal } from '@lucide/vue'
+import { Columns3, Filter, Search, SlidersHorizontal, X } from '@lucide/vue'
 import BookingIcon from '@/components/icons/BookingIcon.vue'
 import TableBulkActionBar from '@/components/grid/TableBulkActionBar.vue'
 import TableRowContextMenu, {
@@ -318,6 +318,21 @@ function clearAdvanced() {
   }
 }
 
+/** Turn off active advanced filters (keeps quick search / column sort). */
+function cancelAdvancedSearch() {
+  if (!advCount.value && !advancedOpen.value) return
+  clearAdvanced()
+  advancedOpen.value = false
+}
+
+function onAdvancedClick() {
+  advancedOpen.value = true
+}
+
+function onAdvancedDblClick() {
+  if (advCount.value) cancelAdvancedSearch()
+}
+
 function clearSort() {
   gridApi.value?.applyColumnState({ defaultState: { sort: null } })
   sortHint.value = ''
@@ -371,21 +386,42 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
       >
         ⌘K
       </kbd>
-      <button
-        type="button"
-        class="flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-3 text-[12px] font-semibold hover:bg-slate-50"
-        :class="advCount ? 'border-teal-300 bg-teal-50 text-teal-900' : ''"
-        @click="advancedOpen = true"
+      <div
+        class="inline-flex h-8 items-center overflow-hidden rounded-md border"
+        :class="advCount ? 'border-teal-300 bg-teal-50' : 'border-slate-200 bg-white'"
       >
-        <SlidersHorizontal :size="14" />
-        Advanced
-        <span
-          v-if="advCount"
-          class="rounded-full bg-teal-700 px-1.5 text-[10px] font-bold text-white"
+        <button
+          type="button"
+          class="flex h-full items-center gap-1.5 px-3 text-[12px] font-semibold hover:bg-slate-50/80"
+          :class="advCount ? 'text-teal-900' : 'text-slate-800'"
+          :title="
+            advCount
+              ? 'Open advanced search · double-click to clear filters'
+              : 'Open advanced search'
+          "
+          @click="onAdvancedClick"
+          @dblclick.prevent="onAdvancedDblClick"
         >
-          {{ advCount }}
-        </span>
-      </button>
+          <SlidersHorizontal :size="14" />
+          Advanced
+          <span
+            v-if="advCount"
+            class="rounded-full bg-teal-700 px-1.5 text-[10px] font-bold text-white"
+          >
+            {{ advCount }}
+          </span>
+        </button>
+        <button
+          v-if="advCount"
+          type="button"
+          class="flex h-full items-center border-l border-teal-200 px-2 text-teal-800 hover:bg-teal-100"
+          title="Cancel advanced search"
+          aria-label="Cancel advanced search"
+          @click="cancelAdvancedSearch"
+        >
+          <X :size="14" />
+        </button>
+      </div>
       <button
         type="button"
         class="flex h-8 items-center gap-1.5 rounded-md border border-slate-200 px-3 text-[12px] font-semibold hover:bg-slate-50"
@@ -500,15 +536,20 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
 </template>
 
 <style scoped>
+/* Typography: header+cells 12px · header 600 · cells 400 · actions 11px · row 36 / header 32 */
 .job-ag-grid {
-  --ag-font-family: inherit;
+  --ag-font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
   --ag-font-size: 12px;
+  --ag-header-font-size: 12px;
+  --ag-header-font-weight: 600;
   --ag-border-color: #e2e8f0;
   --ag-header-background-color: #f8fafc;
   --ag-odd-row-background-color: #ffffff;
   --ag-row-hover-color: #ccfbf1;
   --ag-selected-row-background-color: #99f6e4;
   --ag-range-selection-border-color: #0f766e;
+  font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
+  font-size: 12px;
 }
 .job-ag-grid :deep(.ag-root-wrapper) {
   border-radius: 8px;
@@ -526,6 +567,26 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
 }
 .job-ag-grid :deep(.ag-header-cell-label) {
   cursor: grab;
+  overflow: visible;
+}
+.job-ag-grid :deep(.ag-header-cell-text) {
+  overflow: visible !important;
+  text-overflow: clip !important;
+  white-space: normal !important;
+  line-height: 1.25;
+  font-size: 12px;
+  font-weight: 600;
+  color: #0f172a;
+}
+.job-ag-grid :deep(.ag-cell) {
+  font-size: 12px;
+  font-weight: 400;
+  line-height: 1.35;
+}
+.job-ag-grid :deep(.ag-cell.font-mono),
+.job-ag-grid :deep(.font-mono) {
+  font-size: 12px;
+  font-weight: 400;
 }
 .job-ag-grid :deep(.ag-header-cell-moving .ag-header-cell-label) {
   cursor: grabbing;

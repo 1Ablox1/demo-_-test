@@ -220,6 +220,14 @@ function openRow(id: string) {
   })
 }
 
+function goCreateConsole() {
+  const lob = airDirectionFromQuery(route.query as Record<string, unknown>) ?? workspaceAir.value ?? 'AI'
+  void router.push({
+    name: 'orchestrate',
+    query: { lob, create: '1', path: 'direct', from: 'consoles' },
+  })
+}
+
 function backToList() {
   const lob = airDirectionFromQuery(route.query as Record<string, unknown>)
   void router.push({
@@ -448,6 +456,8 @@ watch(
         :lob-key="workspaceAir ?? 'ALL'"
         :title="workspaceTitle"
         @open="openRow"
+        @create="goCreateConsole"
+        @toast="(msg, kind) => toastRef?.show(msg, kind)"
       />
 
       <!-- DETAIL -->

@@ -37,7 +37,7 @@ const CONSOLE_GRID_FIELDS_RAW: GridField[] = [
     columnable: true,
     sortable: true,
     mono: true,
-    width: 140,
+    width: 168,
     searchHint: 'AI-4100Z',
   }),
   f({

@@ -16,7 +16,7 @@ export interface BookCreateQuery {
   path?: BookingEntryPath
   lob?: SpineLobPrefix
   /** Provenance for idle banner */
-  from?: 'needs-you' | 'quote-new' | 'job-new'
+  from?: 'needs-you' | 'quote-new' | 'job-new' | 'consoles'
 }
 
 export interface CreateJobRouteTarget {
