@@ -111,9 +111,22 @@ async function enrichClearanceFromEcho(
 export async function fetchJobContext(shipmentId: number): Promise<JobContext> {
   const echoJobId = echoJobIdForShipment(shipmentId)
   if (usesEchoReads() && echoJobId) {
-    const job = await echoFetchJob(echoJobId)
-    const mapped = mapEchoJobToContext(job, shipmentId)
-    return enrichClearanceFromEcho(mapped, echoJobId, shipmentId)
+    try {
+      const job = await echoFetchJob(echoJobId)
+      const mapped = mapEchoJobToContext(job, shipmentId)
+      return enrichClearanceFromEcho(mapped, echoJobId, shipmentId)
+    } catch (err) {
+      // Echo 502 / down — Charges + Overview must still load from MSW (hybrid)
+      if (usesMswMocks()) {
+        console.warn(
+          '[hybrid] Echo job unavailable, falling back to MSW',
+          echoJobId,
+          err instanceof Error ? err.message : err,
+        )
+        return mockApi<JobContext>(`/jobs/${shipmentId}`)
+      }
+      throw err
+    }
   }
   return mockApi<JobContext>(`/jobs/${shipmentId}`)
 }
@@ -373,7 +386,7 @@ export function resetNumberingMock() {
   return mockApi('/os/numbering/reset-mock', { method: 'POST' })
 }
 
-/** Operational MDM — control-plane → adapter → legacy mdm-service (mock or live). */
+/** Operational MDM — Echo stage reference in hybrid/live; MSW fixtures only in mock. */
 export type OsMdmSearchKind =
   | 'customer'
   | 'airport'
@@ -382,20 +395,42 @@ export type OsMdmSearchKind =
   | 'charge'
   | 'currency'
 
-export function searchOsMdm(kind: OsMdmSearchKind, q = '') {
+export async function searchOsMdm(kind: OsMdmSearchKind, q = '') {
+  if (usesEchoReads()) {
+    const { echoSearchMdm } = await import('@/api/echo/reference')
+    const items = await echoSearchMdm(kind, q)
+    return { items }
+  }
   return mockApi<{ items: import('@/mdm/types').MasterOption[] }>('/os/mdm/search', {
     query: { kind, q },
   })
 }
 
-export function createOsMdmParty(body: import('@/mdm/types').QuickCreateCustomerInput) {
+export async function createOsMdmParty(body: import('@/mdm/types').QuickCreateCustomerInput) {
+  if (usesEchoReads()) {
+    // Stage has no OS create-party write yet — local pending draft only
+    const value = `DRAFT-${Date.now().toString(36).toUpperCase()}`
+    return {
+      kind: 'customer' as const,
+      label: body.companyName.trim(),
+      value,
+      aliases: [body.companyName.trim()],
+      meta: `${body.partnerRoles.join('+')} · ${body.countryLabel} · Pending Finance`,
+      status: 'pending_approval' as const,
+      requestedBy: body.requestedBy,
+      approverSeat: 'Finance',
+    }
+  }
   return mockApi<import('@/mdm/types').MasterOption>('/os/mdm/parties', {
     method: 'POST',
     body,
   })
 }
 
-export function approveOsMdmParty(value: string) {
+export async function approveOsMdmParty(value: string) {
+  if (usesEchoReads()) {
+    return { ok: true as const }
+  }
   return mockApi<{ ok: boolean }>(`/os/mdm/parties/${encodeURIComponent(value)}/approve`, {
     method: 'POST',
   })

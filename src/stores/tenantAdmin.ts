@@ -31,7 +31,7 @@ export const useTenantAdminStore = defineStore('tenantAdmin', () => {
   const legalName = ref('Waltech Logistics')
   const env = ref('h5-stage-db')
   const hqCountryCode = ref('AU')
-  /** Legacy company id — Echo stub `9001`; wire-time from session */
+  /** Legacy company id — synced from Echo session on login (Alice stub = 9001) */
   const companyId = ref('9001')
   /** Operator working office (legacy opOffice) — header context, not pack codes */
   const activeOfficeCode = ref('SYD')

@@ -61,7 +61,12 @@ export function parseBookCreateQuery(query: Record<string, unknown>): {
   const lobPrefix = isSpineLob(lobRaw) ? lobRaw : undefined
   const fromRaw = typeof query.from === 'string' ? query.from : undefined
   const from =
-    fromRaw === 'needs-you' || fromRaw === 'quote-new' || fromRaw === 'job-new' ? fromRaw : undefined
+    fromRaw === 'needs-you' ||
+    fromRaw === 'quote-new' ||
+    fromRaw === 'job-new' ||
+    fromRaw === 'consoles'
+      ? fromRaw
+      : undefined
   return { open: !!create, entryPath, lobPrefix, from }
 }
 

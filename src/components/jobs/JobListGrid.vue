@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { AgGridVue } from 'ag-grid-vue3'
 import {
   AllCommunityModule,
@@ -57,6 +57,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   open: [id: string]
+  edit: [id: string]
   create: []
   toast: [message: string, kind?: 'success' | 'info' | 'warn']
 }>()
@@ -175,10 +176,44 @@ const lobLabel = computed(() =>
   props.lobKey === 'AE' ? 'Air Export' : props.lobKey === 'AI' ? 'Air Import' : 'Air',
 )
 
+let lastOpenAt = 0
+function openEditJob(id: string) {
+  const now = Date.now()
+  if (now - lastOpenAt < 400) return
+  lastOpenAt = now
+  emit('edit', id)
+}
+
 function onGridReady(e: GridReadyEvent<ShipmentRecord>) {
   gridApi.value = e.api
-  requestAnimationFrame(() => bindFromRoot())
+  requestAnimationFrame(() => {
+    bindFromRoot()
+    gridHost.value?.addEventListener('dblclick', onNativeDblClick)
+  })
 }
+
+function onNativeDblClick(ev: MouseEvent) {
+  if (ev.button !== 0) return
+  const t = ev.target as HTMLElement | null
+  if (!t || t.closest('.ag-header, input, button, a, [data-row-action]')) return
+  const rowEl = t.closest('.ag-row') as HTMLElement | null
+  if (!rowEl || !gridApi.value) return
+  const rowId =
+    rowEl.getAttribute('row-id') ||
+    rowEl.getAttribute('data-id') ||
+    rowEl.getAttribute('row-index')
+  if (rowId == null) return
+  // Prefer getRowId key; fall back to displayed index
+  let id = gridApi.value.getRowNode(rowId)?.data?.id
+  if (!id && /^\d+$/.test(rowId)) {
+    id = gridApi.value.getDisplayedRowAtIndex(Number(rowId))?.data?.id
+  }
+  if (id) openEditJob(id)
+}
+
+onBeforeUnmount(() => {
+  gridHost.value?.removeEventListener('dblclick', onNativeDblClick)
+})
 
 function onSortChanged(e: SortChangedEvent<ShipmentRecord>) {
   const model = e.api.getColumnState().filter((c) => c.sort != null)
@@ -217,10 +252,20 @@ function onRowClicked(e: RowClickedEvent<ShipmentRecord>) {
 }
 
 function onRowDoubleClicked(e: RowDoubleClickedEvent<ShipmentRecord>) {
-  if (didDrag.value) return
+  const ev = e.event as MouseEvent | undefined
+  // Left double-click → Edit Job
+  if (ev != null && typeof ev.button === 'number' && ev.button !== 0) return
   const t = e.event?.target as HTMLElement | null
-  if (t?.closest?.('.ag-checkbox-input, .ag-selection-checkbox, [data-row-action]')) return
-  if (e.data?.id) emit('open', e.data.id)
+  if (t?.closest?.('.ag-checkbox-input, .ag-selection-checkbox, [data-row-action], .ag-header')) return
+  if (e.data?.id) openEditJob(e.data.id)
+}
+
+function onCellDoubleClicked(e: CellClickedEvent<ShipmentRecord>) {
+  const ev = e.event as MouseEvent | undefined
+  if (ev != null && typeof ev.button === 'number' && ev.button !== 0) return
+  const t = e.event?.target as HTMLElement | null
+  if (t?.closest?.('.ag-checkbox-input, .ag-selection-checkbox, [data-row-action], .ag-header')) return
+  if (e.data?.id) openEditJob(e.data.id)
 }
 
 function openContextAt(row: ShipmentRecord, clientX: number, clientY: number) {
@@ -247,7 +292,7 @@ function onCellClicked(e: CellClickedEvent<ShipmentRecord>) {
   e.event?.stopPropagation?.()
   const action = btn.getAttribute('data-row-action')
   if (action === 'edit') {
-    emit('open', e.data.id)
+    emit('edit', e.data.id)
     return
   }
   if (action === 'copy') {
@@ -270,7 +315,8 @@ function onContextAction(action: TableContextAction) {
   const row = ctxRow.value
   ctxOpen.value = false
   if (!row) return
-  if (action === 'edit') emit('open', row.id)
+  if (action === 'overview') emit('open', row.id)
+  else if (action === 'edit') emit('edit', row.id)
   else if (action === 'copy') void copyJobCodes(row)
   else if (action === 'duplicate') {
     emit('toast', `Duplicated draft line from ${row.jobNo} (mock)`, 'info')
@@ -351,8 +397,8 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
         </p>
         <h1 class="text-[18px] font-bold tracking-tight text-slate-900">Job list</h1>
         <p class="mt-0.5 text-[12px] text-muted-foreground">
-          Double-click a row to edit · drag headers to reorder · drag rows to scroll · click headers to
-          sort
+          Double-click a row to Edit Job · right-click for Overview / Edit · drag headers to reorder ·
+          click headers to sort
         </p>
       </div>
       <div class="flex items-center gap-2">
@@ -464,7 +510,7 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
       </span>
     </div>
 
-    <div ref="gridHost" class="ag-theme-quartz job-ag-grid min-h-0 flex-1 px-3 pb-3 pt-2">
+    <div ref="gridHost" class="ag-theme-quartz os-list-ag-grid min-h-0 flex-1 px-3 pb-3 pt-2">
       <AgGridVue
         class="h-full w-full"
         :row-data="filteredRows"
@@ -491,6 +537,7 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
         @row-clicked="onRowClicked"
         @row-double-clicked="onRowDoubleClicked"
         @cell-clicked="onCellClicked"
+        @cell-double-clicked="onCellDoubleClicked"
         @cell-context-menu="onCellContextMenu"
       />
     </div>
@@ -509,6 +556,7 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
       :y="ctxY"
       :can-delete="canDeleteCtx"
       :entity-label="ctxRow?.jobNo"
+      variant="jobs"
       @close="ctxOpen = false"
       @action="onContextAction"
     />
@@ -535,102 +583,4 @@ const canDeleteCtx = computed(() => isDraftStatus(ctxRow.value?.status))
   </div>
 </template>
 
-<style scoped>
-/* Typography: header+cells 12px · header 600 · cells 400 · actions 11px · row 36 / header 32 */
-.job-ag-grid {
-  --ag-font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
-  --ag-font-size: 12px;
-  --ag-header-font-size: 12px;
-  --ag-header-font-weight: 600;
-  --ag-border-color: #e2e8f0;
-  --ag-header-background-color: #f8fafc;
-  --ag-odd-row-background-color: #ffffff;
-  --ag-row-hover-color: #ccfbf1;
-  --ag-selected-row-background-color: #99f6e4;
-  --ag-range-selection-border-color: #0f766e;
-  font-family: var(--font-sans), 'Inter', system-ui, sans-serif;
-  font-size: 12px;
-}
-.job-ag-grid :deep(.ag-root-wrapper) {
-  border-radius: 8px;
-  overflow: hidden;
-}
-.job-ag-grid :deep(.ag-row) {
-  cursor: pointer;
-}
-.job-ag-grid :deep(.ag-row-selected) {
-  background-color: #99f6e4 !important;
-  box-shadow: inset 3px 0 0 #0f766e;
-}
-.job-ag-grid :deep(.ag-row-selected::before) {
-  content: none;
-}
-.job-ag-grid :deep(.ag-header-cell-label) {
-  cursor: grab;
-  overflow: visible;
-}
-.job-ag-grid :deep(.ag-header-cell-text) {
-  overflow: visible !important;
-  text-overflow: clip !important;
-  white-space: normal !important;
-  line-height: 1.25;
-  font-size: 12px;
-  font-weight: 600;
-  color: #0f172a;
-}
-.job-ag-grid :deep(.ag-cell) {
-  font-size: 12px;
-  font-weight: 400;
-  line-height: 1.35;
-}
-.job-ag-grid :deep(.ag-cell.font-mono),
-.job-ag-grid :deep(.font-mono) {
-  font-size: 12px;
-  font-weight: 400;
-}
-.job-ag-grid :deep(.ag-header-cell-moving .ag-header-cell-label) {
-  cursor: grabbing;
-}
-.job-ag-grid.h-drag-scroll :deep(.ag-center-cols-viewport),
-.job-ag-grid.h-drag-scroll :deep(.ag-body-viewport) {
-  cursor: grab;
-}
-.job-ag-grid.is-h-dragging,
-.job-ag-grid.is-h-dragging :deep(.ag-center-cols-viewport),
-.job-ag-grid.is-h-dragging :deep(.ag-body-viewport),
-.job-ag-grid.is-h-dragging :deep(.ag-row) {
-  cursor: grabbing !important;
-  user-select: none;
-}
-.job-ag-grid :deep(.os-row-actions-cell) {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-}
-.job-ag-grid :deep(.os-row-actions) {
-  display: none;
-  align-items: center;
-  gap: 2px;
-}
-.job-ag-grid :deep(.ag-row-hover .os-row-actions),
-.job-ag-grid :deep(.ag-row-selected .os-row-actions) {
-  display: inline-flex;
-}
-.job-ag-grid :deep(.os-row-action) {
-  display: inline-flex;
-  height: 24px;
-  min-width: 24px;
-  align-items: center;
-  justify-content: center;
-  border-radius: 6px;
-  border: 1px solid #e2e8f0;
-  background: #fff;
-  font-size: 11px;
-  font-weight: 700;
-  color: #0f766e;
-  cursor: pointer;
-}
-.job-ag-grid :deep(.os-row-action:hover) {
-  background: #ccfbf1;
-}
-</style>
+<!-- Shared AG Grid chrome: src/styles/os-list-ag-grid.css (.os-list-ag-grid) -->

@@ -1,8 +1,11 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import { ChevronDown } from '@lucide/vue'
+import SmartAutocomplete from '@/components/airfreight/SmartAutocomplete.vue'
 import type { BookingDraft } from '@/types/bookingWizard'
 import type { AuBiosecurityRisk, AuFreightTerm } from '@/types/auAirImport'
+import type { MasterSelection } from '@/mdm/types'
+import { useMastersStore } from '@/stores/masters'
 
 const props = defineProps<{
   draft: BookingDraft
@@ -12,6 +15,12 @@ const emit = defineEmits<{
   'update:draft': [draft: BookingDraft]
   jump: [id: 'shipment' | 'billing']
 }>()
+
+const masters = useMastersStore()
+
+onMounted(() => {
+  void masters.ensureEchoCatalog()
+})
 
 /** Progressive disclosure levels — essentials first. */
 const showOps = ref(false)
@@ -24,12 +33,32 @@ function patchClearance(partial: Partial<BookingDraft['clearance']>) {
   })
 }
 
+function patchHs(value: string) {
+  emit('update:draft', {
+    ...props.draft,
+    hsCode: value,
+    clearance: { ...props.draft.clearance, commodityHs: value },
+  })
+}
+
 const abnOk = computed(() => /^\d{11}$/.test(props.draft.clearance.ownerAbn.replace(/\s/g, '')))
 const daffNeedsPermit = computed(
   () =>
     props.draft.clearance.biosecurityRisk === 'permit_required' ||
     props.draft.clearance.biosecurityRisk === 'daff_review',
 )
+
+const countrySel = computed({
+  get: (): MasterSelection => {
+    const v = props.draft.clearance.countryOfOrigin
+    if (!v) return null
+    const hit = masters.countries.find((c) => c.value === v || c.label === v)
+    return hit
+      ? { label: hit.label, value: hit.value, kind: 'country', status: 'active' }
+      : { label: v, value: v, kind: 'country', status: 'active' }
+  },
+  set: (sel) => patchClearance({ countryOfOrigin: sel?.value ?? '' }),
+})
 
 const freightOptions: { value: AuFreightTerm; label: string }[] = [
   { value: '', label: 'Select…' },
@@ -128,13 +157,28 @@ const daffOptions: { value: AuBiosecurityRisk; label: string }[] = [
         </label>
         <label class="block text-[12px] font-medium text-slate-700 sm:col-span-2">
           Country of origin
-          <input
-            class="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2.5 text-[13px] outline-none focus:border-slate-500"
-            :value="draft.clearance.countryOfOrigin"
-            placeholder="e.g. CN"
-            @input="patchClearance({ countryOfOrigin: ($event.target as HTMLInputElement).value })"
+          <SmartAutocomplete
+            v-model="countrySel"
+            class="mt-1"
+            storage-key="book-clearance-country"
+            :options="masters.countries"
+            :frequent-values="masters.frequentCountryValues"
+            placeholder="ISO country"
           />
         </label>
+        <p
+          v-if="draft.customsBroker || draft.customsRequired || draft.hsCode"
+          class="sm:col-span-2 rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-[11px] text-slate-600"
+        >
+          <span class="font-semibold text-slate-800">From Shipment:</span>
+          <span v-if="draft.customsRequired">
+            customs {{ draft.customsRequired === 'Y' ? 'required' : 'not required' }}
+          </span>
+          <span v-if="draft.customsBroker">
+            · broker {{ draft.customsBroker }}
+          </span>
+          <span v-if="draft.hsCode" class="font-mono"> · HS {{ draft.hsCode }}</span>
+        </p>
       </div>
     </section>
 
@@ -164,9 +208,9 @@ const daffOptions: { value: AuBiosecurityRisk; label: string }[] = [
           HS / tariff hint
           <input
             class="mt-1 h-9 w-full rounded-lg border border-slate-200 px-2.5 font-mono text-[13px] outline-none focus:border-slate-500"
-            :value="draft.clearance.commodityHs"
+            :value="draft.clearance.commodityHs || draft.hsCode"
             placeholder="Broker validates"
-            @input="patchClearance({ commodityHs: ($event.target as HTMLInputElement).value })"
+            @input="patchHs(($event.target as HTMLInputElement).value)"
           />
         </label>
         <label class="block text-[12px] font-medium text-slate-700">

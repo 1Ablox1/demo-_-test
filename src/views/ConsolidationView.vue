@@ -4,16 +4,16 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   ArrowLeft,
   Copy,
-  Link2,
   Pencil,
   Plus,
-  Save,
-  Ticket,
   Unlink,
 } from '@lucide/vue'
 import AppShell from '@/components/AppShell.vue'
 import ConsoleListGrid from '@/components/consoles/ConsoleListGrid.vue'
+import ConsoleChargesPanel from '@/components/consolidation/ConsoleChargesPanel.vue'
 import HouseDetailDrawer from '@/components/consolidation/HouseDetailDrawer.vue'
+import MasterBillPanel from '@/components/consolidation/MasterBillPanel.vue'
+import ExecutionStickyHeader from '@/components/execution/ExecutionStickyHeader.vue'
 import JobHandoffSpine, {
   type HandoffNode,
   type HandoffNodeId,
@@ -31,12 +31,24 @@ import {
   useFreightStore,
   type ConsolidationRecord,
   type ShipmentRecord,
-  type ShipmentStatus,
 } from '@/stores/freight'
+import { useChargesStore } from '@/stores/charges'
+import { useJobStore } from '@/stores/job'
 import { JOB_STATUS } from '@/data/legacySearchOptions'
 import { isBlockedJobStatus } from '@/lib/jobStatus'
+import { assertNotConsoleCustomsEntry } from '@/lib/consoleDomain'
+import {
+  AU_SPINE_ACCOUNTABLE,
+  AU_SPINE_FOCUS_FIELD,
+  detectAuCustomsHold,
+} from '@/lib/auLifecycle'
+import { jumpToFieldKey, jumpToSectionElement } from '@/lib/fieldJump'
 
 const freight = useFreightStore()
+const charges = useChargesStore()
+const saving = ref(false)
+const consoleDirty = ref(false)
+const jobStore = useJobStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -102,13 +114,17 @@ const poolOptions = computed(() =>
   })),
 )
 
+const masterJobNumericId = computed(() => {
+  if (!liveCon.value) return 0
+  const n = Number(liveCon.value.masterJobId)
+  return Number.isFinite(n) ? n : 0
+})
+
 const handoffNodes = computed((): HandoffNode[] => {
-  const held = houses.value.some(
-    (h) =>
-      isBlockedJobStatus(h.status) ||
-      h.extras?.clearanceGate === 'held' ||
-      h.auImport?.biosecurityRisk === 'daff_review',
-  )
+  const hold = detectAuCustomsHold(null, null, houses.value)
+  const held = hold.held
+  const moneyState = charges.payload?.moneyState
+  const billingDone = moneyState === 'charges_approved' || moneyState === 'invoiced'
   return [
     {
       id: 'booking',
@@ -119,6 +135,8 @@ const handoffNodes = computed((): HandoffNode[] => {
       raci: 'R',
       sla: 'SLA met',
       section: 'master',
+      focusKey: AU_SPINE_FOCUS_FIELD.booking,
+      accountable: AU_SPINE_ACCOUNTABLE.booking,
     },
     {
       id: 'flight',
@@ -129,6 +147,8 @@ const handoffNodes = computed((): HandoffNode[] => {
       raci: 'R',
       sla: liveCon.value?.etd ? `ETD ${liveCon.value.etd}` : 'Departed',
       section: 'master',
+      focusKey: AU_SPINE_FOCUS_FIELD.flight,
+      accountable: AU_SPINE_ACCOUNTABLE.flight,
     },
     {
       id: 'customs',
@@ -137,28 +157,49 @@ const handoffNodes = computed((): HandoffNode[] => {
       state: held ? 'held' : 'active',
       owner: operatorLabel('customsOps'),
       raci: 'R',
-      sla: held ? '4h 12m remaining' : 'Clearance open',
+      sla: held ? hold.detail : 'House clearance — open HAWB · N10',
       section: 'houses',
+      stateBadge: held ? hold.badge : undefined,
+      focusKey: AU_SPINE_FOCUS_FIELD.customs,
+      accountable: AU_SPINE_ACCOUNTABLE.customs,
     },
     {
       id: 'arrival',
       label: 'Cargo Arrival',
       short: '4. Cargo Arrival',
-      state: 'pending',
+      state: held ? 'pending' : 'pending',
       owner: operatorLabel('arrivalDesk'),
       raci: 'R',
-      sla: liveCon.value?.eta ? `ETA ${liveCon.value.eta}` : 'Awaiting',
+      sla: liveCon.value?.eta ? `ETA ${liveCon.value.eta}` : 'Awaiting breakdown',
       section: 'houses',
+      focusKey: AU_SPINE_FOCUS_FIELD.arrival,
+      accountable: AU_SPINE_ACCOUNTABLE.arrival,
+    },
+    {
+      id: 'billing',
+      label: 'Charges & Invoice',
+      short: '5. Charges & Invoice',
+      state: billingDone ? 'done' : 'pending',
+      owner: operatorLabel('invoiceDesk'),
+      raci: 'A',
+      sla: billingDone
+        ? 'Carrier AP approved · House AR separate'
+        : 'Unified Ledger · Carrier AP on Console · House AR',
+      section: 'billing',
+      focusKey: AU_SPINE_FOCUS_FIELD.billing,
+      accountable: AU_SPINE_ACCOUNTABLE.billing,
     },
     {
       id: 'delivery',
       label: 'Final Delivery',
-      short: '5. Final Delivery',
-      state: 'pending',
+      short: '6. Final Delivery',
+      state: held ? 'pending' : 'pending',
       owner: operatorLabel('deliveryDesk'),
       raci: 'R',
-      sla: 'Not started',
+      sla: held ? 'D/O blocked — customs hold' : 'House D/O · cartage · POD',
       section: 'attach',
+      focusKey: AU_SPINE_FOCUS_FIELD.delivery,
+      accountable: AU_SPINE_ACCOUNTABLE.delivery,
     },
   ]
 })
@@ -173,8 +214,9 @@ const allChecked = computed({
 const batchVisible = computed(() => selectedIds.value.size > 0)
 
 function customsPill(h: ShipmentRecord) {
-  if (h.extras?.clearanceGate === 'held' || h.auImport?.biosecurityRisk === 'daff_review') {
-    return { label: 'HELD', cls: 'os-badge--amber', dot: 'bg-amber-600' }
+  const hold = detectAuCustomsHold(h, h.auImport)
+  if (hold.held) {
+    return { label: hold.badge, cls: 'os-badge--amber', dot: 'bg-amber-600' }
   }
   if (isBlockedJobStatus(h.status)) {
     return { label: h.status.toUpperCase(), cls: 'os-badge--amber', dot: 'bg-amber-600' }
@@ -192,10 +234,16 @@ function setSectionRef(id: string, el: unknown) {
   sectionEls.value[id] = el as HTMLElement | null
 }
 
+function parseMasterJobId(masterJobId: string): number | null {
+  const n = Number(masterJobId)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
 function loadId(id: string | null) {
   ctx.value = null
   selectedIds.value = new Set()
   focusedHouseId.value = null
+  consoleDirty.value = false
   if (!id) {
     draft.value = null
     freight.selectConsolidation(null)
@@ -208,14 +256,18 @@ function loadId(id: string | null) {
   }
   draft.value = { ...row, houseIds: [...row.houseIds] }
   freight.selectConsolidation(id)
+  const masterId = parseMasterJobId(row.masterJobId)
+  if (masterId != null) {
+    void jobStore.load(masterId)
+    void charges.load(masterId)
+  }
   savedNote.value = ''
 }
 
 function openRow(id: string) {
   const lob = airDirectionFromQuery(route.query as Record<string, unknown>)
   void router.push({
-    name: 'consolidation',
-    params: { consolidationId: id },
+    path: `/consolidations/${encodeURIComponent(id)}`,
     query: lob ? { lob } : {},
   })
 }
@@ -241,14 +293,26 @@ function toast(msg: string, kind: 'success' | 'info' | 'warn' = 'success') {
 }
 
 function save() {
-  if (!draft.value) return
+  if (!draft.value || saving.value) return
+  saving.value = true
   freight.updateConsolidation(draft.value.id, { ...draft.value })
+  consoleDirty.value = false
   savedNote.value = 'Saved — MBL synced to houses'
   toast('Master saved · houses inherited MBL')
+  saving.value = false
   setTimeout(() => {
     savedNote.value = ''
   }, 2000)
 }
+
+function markConsoleDirty() {
+  consoleDirty.value = true
+}
+
+const consoleEntityTag = computed(() => {
+  if (!liveCon.value) return 'Console'
+  return `${operateTypeLabel(liveCon.value.operateType)} · ${liveCon.value.masterJobNo}`
+})
 
 function flash(msg: string) {
   actionMsg.value = msg
@@ -317,10 +381,14 @@ function openMasterShipment() {
   const lob =
     airDirectionFromQuery(route.query as Record<string, unknown>) ??
     (liveCon.value.lob === 'air_import' ? 'AI' : liveCon.value.lob === 'air_export' ? 'AE' : null)
+  // Full Master Job edit form (same surface as Jobs → Edit Job)
   void router.push({
-    name: 'job-context',
+    name: 'shipment',
     params: { shipmentId: liveCon.value.masterJobId },
-    query: lob ? { lob } : {},
+    query: {
+      ...(lob ? { lob } : {}),
+      from: 'console',
+    },
   })
 }
 
@@ -344,10 +412,42 @@ function openHouseDrawer(id: string) {
   ctx.value = null
 }
 
+/** Domain: customs entry is House-only — Console only opens the house desk. */
+function openHouseForCustoms(houseId: string) {
+  try {
+    assertNotConsoleCustomsEntry('console')
+  } catch {
+    /* expected — redirect to house */
+  }
+  openHouseDrawer(houseId)
+}
+
+function executeBreakdown() {
+  if (!liveCon.value) return
+  flash(
+    `Breakdown executed on ${liveCon.value.masterJobNo} — house clearance workflows signaled (mock)`,
+  )
+}
+
+function openMasterBilling() {
+  // Domain: Console has no customer AR — open first house billing for AR invoice work
+  const firstHouse = houses.value[0]
+  if (firstHouse) {
+    openHouseForArInvoice(firstHouse.id)
+    toast('Customer AR lives on House Jobs — opened first house billing', 'info')
+    return
+  }
+  toast('Attach a House Job before customer AR invoicing', 'warn')
+}
+
 function onRowContext(e: MouseEvent, h: ShipmentRecord) {
   e.preventDefault()
   focusedHouseId.value = h.id
-  ctx.value = { x: Math.min(e.clientX, window.innerWidth - 200), y: Math.min(e.clientY, window.innerHeight - 160), house: h }
+  ctx.value = {
+    x: Math.min(e.clientX, window.innerWidth - 200),
+    y: Math.min(e.clientY, window.innerHeight - 160),
+    house: h,
+  }
 }
 
 async function copyHawb(h: ShipmentRecord) {
@@ -362,11 +462,31 @@ async function copyMawb(h: ShipmentRecord) {
   ctx.value = null
 }
 
+function openHouseForArInvoice(houseId: string) {
+  void router.push({
+    name: 'shipment',
+    params: { shipmentId: houseId },
+    query: { step: 'money_preview' },
+  })
+}
+
 function onSpineSelect(node: HandoffNode) {
   activeNode.value = node.id
   const key = node.section || 'houses'
   nextTick(() => {
-    sectionEls.value[key]?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    const el = sectionEls.value[key]
+    if (el) jumpToSectionElement(el, { behavior: 'smooth' })
+    // Console: customs / arrival / delivery work on houses — open first house when held focus is broker
+    if (node.id === 'customs' && houses.value[0]) {
+      // spotlight houses grid; customs filing stays on house
+      return
+    }
+    if (node.focusKey === 'etd' || node.focusKey === 'customerId') {
+      const field = el?.querySelector?.(`[data-field-key="${node.focusKey}"]`) as HTMLElement | null
+      if (field) {
+        jumpToFieldKey(node.focusKey, { root: el ?? document, behavior: 'smooth', focus: true })
+      }
+    }
   })
 }
 
@@ -470,105 +590,67 @@ watch(
         @select="onSpineSelect"
       />
 
-      <div class="flex min-h-0 flex-1 overflow-hidden">
-        <section v-if="draft && liveCon" class="flex min-w-0 flex-1 flex-col overflow-hidden">
-          <div class="flex items-center gap-2 border-b border-border bg-card px-4 py-2">
-            <button
-              type="button"
-              class="flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] font-medium hover:bg-muted"
-              @click="backToList"
-            >
-              <ArrowLeft :size="13" />
-              List
-            </button>
-          </div>
-          <div :ref="(el) => setSectionRef('master', el)" class="os-panel m-3 mb-0 shrink-0 p-3">
-            <div class="flex flex-wrap items-start justify-between gap-3">
-              <div class="min-w-0">
-                <div class="flex flex-wrap items-center gap-2">
-                  <span class="font-mono text-[15px] font-bold">{{ liveCon.masterJobNo }}</span>
-                  <span class="os-badge os-badge--teal">{{ LOB_CATALOG[liveCon.lob].prefix }}</span>
-                  <span class="os-badge os-badge--slate">{{ operateTypeLabel(liveCon.operateType) }}</span>
-                </div>
-                <div class="mt-2 flex flex-wrap gap-1.5">
-                  <span class="os-badge os-badge--slate">MBL {{ liveCon.mawb }}</span>
-                  <span class="os-badge os-badge--slate">{{ liveCon.airline }}</span>
-                  <span class="os-badge os-badge--slate">{{ liveCon.route }}</span>
-                  <span class="os-badge os-badge--slate">ETD {{ liveCon.etd || '—' }}</span>
-                  <span class="os-badge os-badge--slate">ETA {{ liveCon.eta || '—' }}</span>
-                </div>
-                <p class="mt-2 flex items-center gap-1.5 text-[11px] text-teal-700">
-                  <Link2 :size="12" :stroke-width="2" />
-                  Inherited by linked houses
-                </p>
-              </div>
-              <div class="flex flex-wrap items-end gap-1.5">
-                <span v-if="savedNote || actionMsg" class="mr-1 text-[11px] font-medium text-teal-700">
-                  {{ actionMsg || savedNote }}
-                </span>
-                <CompactSelect
-                  v-model="poolId"
-                  label="MAWB pool"
-                  hint="Allocate…"
-                  class="w-[170px]"
-                  :options="poolOptions"
-                />
-                <button
-                  type="button"
-                  class="flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] font-medium hover:bg-muted"
-                  @click="onAllocate"
-                >
-                  <Ticket :size="13" />
-                  Allocate MAWB
-                </button>
-                <button
-                  type="button"
-                  class="flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] font-medium hover:bg-muted"
-                  @click="openMasterShipment"
-                >
-                  <Pencil :size="13" />
-                  Edit Master
-                </button>
-                <button
-                  type="button"
-                  class="flex h-8 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] font-medium hover:bg-muted"
-                  @click="openMasterJob"
-                >
-                  Master Job Desk
-                </button>
-                <button
-                  type="button"
-                  class="flex h-8 items-center gap-1 rounded-md bg-primary px-3 text-[11px] font-bold text-white"
-                  @click="save"
-                >
-                  <Save :size="13" />
-                  Save
-                </button>
-              </div>
-            </div>
+      <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+        <div v-if="draft && liveCon" class="flex shrink-0 items-stretch border-b border-border bg-white">
+          <button
+            type="button"
+            class="flex h-[52px] shrink-0 items-center gap-1 border-r border-border px-3 text-[11px] font-medium text-slate-600 hover:bg-slate-50"
+            @click="backToList"
+          >
+            <ArrowLeft :size="13" />
+            List
+          </button>
+          <ExecutionStickyHeader
+            class="min-w-0 flex-1 border-b-0"
+            :entity-tag="consoleEntityTag"
+            :title="`${LOB_CATALOG[liveCon.lob].label} · Console (MAWB master)`"
+            :dirty="consoleDirty"
+            :saving="saving"
+            :submitting="saving"
+            secondary-label="Master job desk"
+            @cancel="backToList"
+            @save-draft="save"
+            @save-submit="save"
+            @secondary="openMasterJob"
+          />
+        </div>
+        <div
+          v-if="draft && liveCon && (savedNote || actionMsg)"
+          class="flex flex-wrap items-center gap-2 border-b border-border bg-slate-50 px-4 py-1.5 text-[11px] text-slate-500"
+        >
+          <span v-if="actionMsg || savedNote" class="font-medium text-teal-700">{{ actionMsg || savedNote }}</span>
+        </div>
 
-            <div class="mt-3 grid grid-cols-2 gap-2 border-t border-border pt-3 sm:grid-cols-4 lg:grid-cols-6">
-              <CompactField v-model="draft.mawb" label="MBL / MAWB" mono required />
-              <CompactField v-model="draft.route" label="Route" mono required />
-              <CompactField v-model="draft.airline" label="Airline" />
-              <CompactField v-model="draft.etd" label="ETD" mono />
-              <CompactField v-model="draft.eta" label="ETA" mono />
-              <CompactSelect
-                :model-value="draft.status"
-                label="Status"
-                :options="statusOptions"
-                @update:model-value="draft.status = $event as ShipmentStatus"
-              />
-            </div>
+        <div class="flex min-h-0 flex-1 overflow-hidden">
+        <section v-if="draft && liveCon" class="flex min-w-0 flex-1 flex-col overflow-y-auto">
+          <div :ref="(el) => setSectionRef('master', el)" class="m-3 mb-0 shrink-0">
+            <MasterBillPanel
+              v-if="draft"
+              :draft="draft"
+              :houses="houses"
+              :pool-id="poolId"
+              :pool-options="poolOptions"
+              :status-options="statusOptions"
+              @update:draft="draft = $event"
+              @update:pool-id="poolId = $event"
+              @dirty="markConsoleDirty"
+              @allocate="onAllocate"
+              @edit-master="openMasterShipment"
+            />
           </div>
 
           <div
             :ref="(el) => setSectionRef('houses', el)"
-            class="os-panel m-3 flex min-h-0 flex-1 flex-col overflow-hidden"
+            class="os-panel m-3 flex min-h-[280px] flex-col overflow-hidden border-violet-100"
           >
-            <div class="flex shrink-0 items-center justify-between border-b border-border px-3 py-2">
-              <div class="text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                House shipments
+            <div class="flex shrink-0 items-center justify-between border-b border-violet-100 bg-violet-50/40 px-3 py-2">
+              <div>
+                <div class="text-[11px] font-bold uppercase tracking-wider text-violet-900">
+                  House Bills · HAWB / HBL
+                </div>
+                <p class="text-[10px] text-violet-800/70">
+                  Customer AR · customs · house cargo — schedule locked from Master
+                </p>
               </div>
               <span class="text-[11px] text-muted-foreground">
                 J/K move · Space check · Enter drawer · right-click
@@ -582,12 +664,12 @@ watch(
                     <th class="w-8">
                       <input v-model="allChecked" type="checkbox" class="accent-primary" />
                     </th>
-                    <th>Job No</th>
+                    <th>HAWB / HBL</th>
+                    <th>House Job</th>
                     <th>Customer</th>
-                    <th>HAWB</th>
-                    <th>Gross / Chg Wt</th>
+                    <th>Pcs / Wt</th>
                     <th>Customs</th>
-                    <th class="w-20">Actions</th>
+                    <th class="w-24">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -609,17 +691,34 @@ watch(
                         @change="toggleCheck(h.id, $event)"
                       />
                     </td>
-                    <td class="font-mono text-[11px] font-semibold text-primary">{{ h.jobNo }}</td>
+                    <td>
+                      <div class="font-mono text-[12px] font-bold text-violet-900">
+                        {{ h.hawb || '— pending HAWB' }}
+                      </div>
+                      <div class="text-[9px] font-medium uppercase tracking-wide text-violet-600/80">
+                        House Bill
+                      </div>
+                    </td>
+                    <td class="font-mono text-[11px] text-muted-foreground">{{ h.jobNo }}</td>
                     <td class="max-w-[160px] truncate">{{ h.customer }}</td>
-                    <td class="font-mono text-[11px]">{{ h.hawb || '—' }}</td>
                     <td class="font-mono text-[11px] text-muted-foreground">
-                      {{ h.chargeableWt || '—' }}
+                      <template v-if="h.auImport?.pieces || h.auImport?.grossWeightKg">
+                        {{ h.auImport?.pieces || '—' }} pcs ·
+                        {{ h.auImport?.grossWeightKg || '—' }} kg
+                      </template>
+                      <template v-else>{{ h.chargeableWt || '—' }}</template>
                     </td>
                     <td>
-                      <span class="os-badge" :class="customsPill(h).cls">
+                      <button
+                        type="button"
+                        class="os-badge"
+                        :class="customsPill(h).cls"
+                        title="Customs is House scope — open HAWB to file entry"
+                        @click.stop="openHouseForCustoms(h.id)"
+                      >
                         <span class="inline-block h-1.5 w-1.5 rounded-full" :class="customsPill(h).dot" />
                         {{ customsPill(h).label }}
-                      </span>
+                      </button>
                     </td>
                     <td @click.stop>
                       <button
@@ -678,8 +777,27 @@ watch(
             </div>
           </div>
 
+          <div
+            :ref="(el) => setSectionRef('billing', el)"
+            class="os-panel m-3 mt-0 scroll-mt-4 p-3"
+          >
+            <ConsoleChargesPanel
+              v-if="masterJobNumericId > 0"
+              :shipment-id="masterJobNumericId"
+              :master-job-no="liveCon.masterJobNo"
+              @breakdown="executeBreakdown"
+              @house-ar="openMasterBilling"
+            />
+          </div>
+
           <div class="mx-3 mb-3">
-            <CompactTextarea v-model="draft.notes" label="Console notes" hint="Internal note" :rows="2" />
+            <CompactTextarea
+              v-model="draft.notes"
+              label="Console notes"
+              hint="Internal note"
+              :rows="2"
+              @update:model-value="markConsoleDirty"
+            />
           </div>
         </section>
 
@@ -696,6 +814,7 @@ watch(
             Back to list
           </button>
         </section>
+      </div>
       </div>
       </template>
     </div>

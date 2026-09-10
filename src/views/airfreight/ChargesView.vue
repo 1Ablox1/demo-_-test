@@ -19,14 +19,17 @@ import {
 } from '@/components/ui/tabs'
 import {
   buildUnifiedLedger,
+  ledgerChipCounts,
+  ledgerRowStatus,
+  ledgerStatusClass,
   type LedgerFilter,
   type UnifiedLedgerRow,
 } from '@/lib/unifiedLedger'
+import UnifiedLedgerTable from '@/components/finance/UnifiedLedgerTable.vue'
 import { useChargesStore } from '@/stores/charges'
 import { useJobStore } from '@/stores/job'
 import { displayJobNo } from '@/lib/jobIdentity'
 
-type UiStatus = 'Draft' | 'Accrued' | 'Approved' | 'Posted' | 'Variance'
 type DrawerTab = 'ap' | 'ar' | 'audit'
 type ChipFilter = 'all' | 'open' | 'variance' | 'posted'
 
@@ -90,47 +93,23 @@ const ledgerRows = computed(() =>
     : [],
 )
 
-function rowStatus(row: UnifiedLedgerRow): UiStatus {
-  if (row.varianceFlagged) return 'Variance'
-  if (row.fullyPosted) return 'Posted'
-  const states = [row.apState, row.arState]
-  if (states.some((s) => s === 'approved' || s === 'invoiced_ar')) return 'Approved'
-  if (states.some((s) => s === 'accrued' || s === 'actual_ap' || s === 'rated')) return 'Accrued'
-  return 'Draft'
-}
+const chipCounts = computed(() => ledgerChipCounts(ledgerRows.value))
 
-const chipCounts = computed(() => {
-  const rows = ledgerRows.value
-  return {
-    all: rows.length,
-    open: rows.filter((r) => {
-      const s = rowStatus(r)
-      return s === 'Draft' || s === 'Accrued'
-    }).length,
-    variance: rows.filter((r) => rowStatus(r) === 'Variance').length,
-    posted: rows.filter((r) => rowStatus(r) === 'Posted').length,
-  }
-})
-
-const visibleRows = computed(() => {
-  const rows = ledgerRows.value
-  if (filter.value === 'all') return rows
-  if (filter.value === 'open') {
-    return rows.filter((r) => {
-      const s = rowStatus(r)
-      return s === 'Draft' || s === 'Accrued'
-    })
-  }
-  if (filter.value === 'variance') return rows.filter((r) => rowStatus(r) === 'Variance')
-  if (filter.value === 'posted') return rows.filter((r) => rowStatus(r) === 'Posted')
-  return rows
-})
+const hasVariance = computed(() => chipCounts.value.variance > 0)
 
 const selectedRow = computed(
   () => ledgerRows.value.find((r) => r.code === selectedCode.value) ?? null,
 )
 
-const hasVariance = computed(() => chipCounts.value.variance > 0)
+function openRow(code: string) {
+  selectedCode.value = code
+  drawerTab.value = 'ap'
+  varianceNote.value = selectedRow.value?.ap?.varianceNote ?? ''
+}
+
+function onLedgerSelect(row: UnifiedLedgerRow) {
+  openRow(row.code)
+}
 
 const jobId = computed(() => {
   if (store.payload?.jobNo?.trim()) return store.payload.jobNo.trim()
@@ -169,23 +148,6 @@ function money(n: number | null | undefined, currency = 'USD') {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   })}`
-}
-
-function statusClass(s: UiStatus) {
-  const map: Record<UiStatus, string> = {
-    Draft: 'border-[#E4E7EC] bg-[#F3F4F6] text-[#6B7280]',
-    Accrued: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#2563EB]',
-    Approved: 'border-[#A7F3D0] bg-[#D1FAE5] text-[#059669]',
-    Posted: 'border-[#1F2937] bg-[#1F2937] text-white',
-    Variance: 'border-[#FDE68A] bg-[#FEF3C7] text-[#B45309]',
-  }
-  return map[s]
-}
-
-function openRow(code: string) {
-  selectedCode.value = code
-  drawerTab.value = 'ap'
-  varianceNote.value = selectedRow.value?.ap?.varianceNote ?? ''
 }
 
 function closeDrawer() {
@@ -532,127 +494,17 @@ watch(selectedRow, (row) => {
           </template>
         </div>
 
-        <!-- AP/AR ledger table -->
-        <div class="overflow-hidden rounded-[10px] border border-[#E4E7EC] bg-white">
-          <div
-            class="grid gap-0 border-b border-[#E4E7EC] bg-[#F9FAFB] px-3.5 py-1.5 text-[10px] font-bold tracking-wide text-[#6B7280]"
-            style="grid-template-columns: 90px 1fr 160px 1fr 80px 24px"
-          >
-            <span>STATUS</span>
-            <span>AP · COST</span>
-            <span class="text-center">CHARGE</span>
-            <span class="text-right">AR · SELL</span>
-            <span class="text-right">MARGIN</span>
-            <span />
-          </div>
-
-          <div
-            v-for="(row, i) in visibleRows"
-            :key="row.code"
-            class="grid cursor-pointer items-center gap-0 px-3.5 py-2 transition-colors"
-            style="grid-template-columns: 90px 1fr 160px 1fr 80px 24px"
-            :class="[
-              i < visibleRows.length - 1 ? 'border-b border-[#F9FAFB]' : '',
-              selectedCode === row.code ? 'bg-[#F0FDFB]' : 'bg-white hover:bg-[#FAFAFA]',
-            ]"
-            @click="openRow(row.code)"
-          >
-            <div>
-              <span
-                class="inline-block rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
-                :class="statusClass(rowStatus(row))"
-              >
-                {{ rowStatus(row).toUpperCase() }}
-              </span>
-            </div>
-
-            <div>
-              <div class="text-[13px] font-semibold text-[#1F2937]">
-                <template v-if="row.ap">
-                  {{ money(row.ap.actualAmount ?? row.apAmount, row.currency) }}
-                  <span
-                    v-if="row.ap.cafApplied"
-                    class="ml-1 rounded bg-primary-tint px-1 text-[10px] font-bold text-primary"
-                    >+CAF</span
-                  >
-                </template>
-                <span v-else class="text-amber-700">{{ t('charges.match.noCost') }}</span>
-              </div>
-              <div
-                v-if="row.ap"
-                class="mt-0.5 flex items-center gap-1.5 text-[11px] text-[#6B7280]"
-              >
-                <span class="truncate">{{ row.ap.partyName ?? '—' }}</span>
-                <span
-                  v-if="
-                    row.ap.actualAmount != null &&
-                    row.ap.accruedAmount != null &&
-                    row.ap.actualAmount !== row.ap.accruedAmount
-                  "
-                  class="text-[10px] text-amber-600"
-                >
-                  ∆ {{ row.currency }}
-                  {{ Math.abs(row.ap.actualAmount - row.ap.accruedAmount).toFixed(0) }}
-                </span>
-              </div>
-            </div>
-
-            <div class="text-center">
-              <div class="flex items-center justify-center gap-1.5">
-                <span
-                  class="rounded bg-[#F3F4F6] px-1.5 py-0.5 font-mono text-xs font-bold text-[#1F2937]"
-                >
-                  {{ row.code }}
-                </span>
-                <span
-                  class="rounded border px-1.5 py-px text-[10px] font-semibold tracking-wide"
-                  :class="
-                    row.oversea
-                      ? 'border-blue-200 bg-blue-50 text-blue-600'
-                      : 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  "
-                >
-                  {{ row.oversea ? 'INT' : 'DOM' }}
-                </span>
-              </div>
-              <div class="mt-0.5 text-[11px] text-[#6B7280]">{{ row.label }}</div>
-            </div>
-
-            <div class="text-right">
-              <div class="text-[13px] font-semibold text-[#1F2937]">
-                <template v-if="row.ar">{{ money(row.arAmount, row.currency) }}</template>
-                <span v-else class="text-amber-700">{{ t('charges.match.noSell') }}</span>
-              </div>
-              <div v-if="row.ar" class="mt-0.5 text-[11px] text-[#6B7280]">
-                {{ row.ar.partyName ?? '—' }}
-              </div>
-            </div>
-
-            <div class="text-right">
-              <span
-                v-if="row.marginPct != null && row.matchState === 'matched'"
-                class="rounded-[5px] border px-1.5 py-0.5 text-xs font-semibold"
-                :class="
-                  row.marginPct < (store.payload?.varianceThresholdPct ?? 15)
-                    ? 'border-[#FDE68A] bg-[#FFFBEB] text-amber-600'
-                    : 'border-[#A7F3D0] bg-[#D1FAE5] text-emerald-600'
-                "
-              >
-                {{ row.marginPct.toFixed(1) }}%
-              </span>
-              <span v-else class="text-[11px] text-[#6B7280]">—</span>
-            </div>
-
-            <div class="flex justify-center text-[#6B7280]">···</div>
-          </div>
-
-          <div
-            v-if="!visibleRows.length"
-            class="px-4 py-10 text-center text-[13px] text-muted-foreground"
-          >
-            No charge lines for this filter.
-          </div>
-        </div>
+        <!-- Unified Ledger (AP + AR paired by code) -->
+        <UnifiedLedgerTable
+          :rows="ledgerRows"
+          :filter="filter"
+          :selected-code="selectedCode"
+          :show-chips="false"
+          :currency-fallback="home"
+          money-scope="full"
+          @select="onLedgerSelect"
+          @update:filter="(f) => (filter = f as ChipFilter)"
+        />
       </template>
 
     <!-- Charge line sheet -->
@@ -676,9 +528,9 @@ watch(selectedRow, (row) => {
                 </SheetTitle>
                 <span
                   class="rounded border px-1.5 py-0.5 text-[10px] font-bold tracking-wide"
-                  :class="statusClass(rowStatus(selectedRow))"
+                  :class="ledgerStatusClass(ledgerRowStatus(selectedRow))"
                 >
-                  {{ rowStatus(selectedRow).toUpperCase() }}
+                  {{ ledgerRowStatus(selectedRow).toUpperCase() }}
                 </span>
               </div>
               <TabsList

@@ -42,7 +42,8 @@ export function firstIncompleteFieldInStep(
       if (!fields.biosecurityRisk) return 'biosecurityRisk'
       return 'brokerRef'
     case 'money_preview':
-      return 'dutyAmountEst'
+      // Ledger panel has no CompactField keys — do not invent a focus key
+      return null
     default:
       return null
   }

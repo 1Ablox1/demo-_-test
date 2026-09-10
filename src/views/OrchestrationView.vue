@@ -36,7 +36,7 @@ const jobHandoff = useJobHandoffStore()
 
 const modalOpen = ref(false)
 const modalPrefills = ref<StartBookingPrefills | null>(null)
-const handoffFrom = ref<'needs-you' | 'quote-new' | 'job-new' | null>(null)
+const handoffFrom = ref<'needs-you' | 'quote-new' | 'job-new' | 'consoles' | null>(null)
 const active = ref(false)
 const draft = ref<BookingDraft>(emptyBookingDraft({ entryPath: 'direct', lobPrefix: 'AI', structure: 'direct' }))
 const stepId = ref<BookingWizardStepId>('shipment')
@@ -81,6 +81,9 @@ const handoffBanner = computed(() => {
   }
   if (handoffFrom.value === 'quote-new') {
     return 'Quote create now runs through Book — pick intent and continue.'
+  }
+  if (handoffFrom.value === 'consoles') {
+    return 'Opened from Consoles — create the house / master booking, then return to the console.'
   }
   return 'Direct booking create now runs through Book — pick intent and continue.'
 })

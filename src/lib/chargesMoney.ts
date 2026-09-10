@@ -54,9 +54,11 @@ export function recomputeGp(payload: ChargesPayload): ChargesGpSummary {
   const ap = payload.lines.filter((l) => l.side === 'AP')
   const sellTotal = round2(ar.reduce((s, l) => s + l.amountAud, 0))
   const accruedCostTotal = round2(ap.reduce((s, l) => s + l.amountAud, 0))
-  const actuals = ap.filter((l) => l.actualAmountAud != null)
-  const actualCostTotal =
-    actuals.length === 0 ? null : round2(actuals.reduce((s, l) => s + (l.actualAmountAud ?? 0), 0))
+  const anyActual = ap.some((l) => l.actualAmountAud != null)
+  // Partial actuals: missing actuals fall back to accrued so actual GP is not inflated
+  const actualCostTotal = !anyActual
+    ? null
+    : round2(ap.reduce((s, l) => s + (l.actualAmountAud ?? l.amountAud), 0))
   const provisionalGp = round2(sellTotal - accruedCostTotal)
   const actualGp = actualCostTotal == null ? null : round2(sellTotal - actualCostTotal)
   const varianceTotal =

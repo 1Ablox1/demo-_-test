@@ -13,6 +13,9 @@ import { displayJobNo } from '@/lib/jobIdentity'
 import { buildJobOwnershipStrip } from '@/lib/jobOwnership'
 import { clearanceBlocksMoney, chargesTabLocked, invoiceTabLocked, moneyBlockFromJob } from '@/lib/moneyGates'
 import { AU_CLEARANCE_GATE_ID } from '@/lib/gateChecklist'
+import { operateChargesLocation } from '@/lib/jobMoneyNav'
+import { formatLedgerMoney } from '@/lib/unifiedLedger'
+import { useChargesStore } from '@/stores/charges'
 import { useJobStore } from '@/stores/job'
 import { useLifecycleStore } from '@/stores/lifecycle'
 import { useTasksStore } from '@/stores/tasks'
@@ -23,6 +26,7 @@ const { t } = useI18n()
 const jobStore = useJobStore()
 const life = useLifecycleStore()
 const tasks = useTasksStore()
+const charges = useChargesStore()
 
 const drawerOpen = ref(false)
 const actionCompleted = ref(false)
@@ -32,8 +36,6 @@ const shipmentId = computed(() => Number(route.params.shipmentId))
 const currentTab = computed<JobShellTab>(() => {
   const name = route.name
   if (name === 'job-spine') return 'timeline'
-  if (name === 'job-charges') return 'charges'
-  if (name === 'job-invoice') return 'invoice'
   return 'overview'
 })
 
@@ -104,14 +106,24 @@ const osPulse = computed(
 )
 
 const gpAmount = computed(() => {
+  const live = charges.payload
+  if (live && live.shipmentId === shipmentId.value) {
+    return formatLedgerMoney(live.gp.provisionalGp, live.homeCurrency)
+  }
   const j = job.value
   if (!j) return '—'
   if (j.ops.provisionalGp) return j.ops.provisionalGp.replace(/^GP:?\s*/i, '')
-  // Derive a display amount from sell when provisional absent
-  return j.ops.sellAmount.replace(/^[A-Z]{3}\s*/, '') || '—'
+  // Never fall back to sellAmount — that mislabels revenue as GP
+  return '—'
 })
 
 const gpPct = computed(() => {
+  const live = charges.payload
+  if (live && live.shipmentId === shipmentId.value) {
+    const sell = live.gp.sellTotal
+    if (!sell) return '—'
+    return `${((live.gp.provisionalGp / sell) * 100).toFixed(1)}%`
+  }
   const raw = job.value?.ops.marginPct ?? ''
   const m = raw.match(/([\d.]+)/)
   return m ? `${m[1]}%` : '—'
@@ -134,7 +146,7 @@ const nextAction = computed(() => {
   const openTask = life.openTasks[0]
   if (openTask) return openTask.title
   if (!clearanceHeld.value) {
-    return job.value?.nextAction ?? 'Accrue charge lines on Charges'
+    return job.value?.nextAction ?? 'Accrue charge lines on Edit Job · Charges & Invoice'
   }
   return (
     panelGates.value[0]?.title ??
@@ -148,17 +160,17 @@ const actionDetail = computed(() => {
     return (
       job.value?.clearance?.note ??
       job.value?.documents.impact ??
-      'Clearance held — Charges and Invoice stay locked.'
+      'Clearance held — Charges & Invoice stay locked on Edit Job.'
     )
   }
   if (moneyState.value === 'charges_approved') {
-    return 'Charges approved — open Invoice to issue the customer bill.'
+    return 'Charges approved — issue the customer bill on Edit Job · Charges & Invoice.'
   }
   if (moneyState.value === 'provisioned') {
-    return 'Charges accrued — switch to Finance seat and Approve, then Invoice.'
+    return 'Charges accrued — switch to Finance seat and Approve on Edit Job · Charges & Invoice.'
   }
   if (!clearanceHeld.value) {
-    return 'Clearance Cleared. Path: Charges (Accrue) → Finance Approve → Invoice.'
+    return 'Clearance Cleared. Path: Edit Job · Charges & Invoice (Accrue → Finance Approve → Issue).'
   }
   return job.value?.documents.impact ?? panelGates.value[0]?.trigger ?? null
 })
@@ -167,17 +179,16 @@ const ctaLabel = computed(() => {
   if (actionCompleted.value) return t('jobShell.cta.submitted')
   if (clearanceChecklistPending.value) return t('jobContext.clearanceGate.openChecklist')
   if (moneyState.value === 'invoiced' || moneyState.value === 'part_invoiced') {
-    return currentTab.value === 'invoice' ? 'Stay on Invoice' : 'Open Invoice'
+    return 'Open Charges & Invoice'
   }
   if (moneyState.value === 'charges_approved') {
-    return currentTab.value === 'invoice' ? 'Stay on Invoice' : 'Open Invoice'
+    return 'Open Charges & Invoice · Issue'
   }
   if (moneyState.value === 'provisioned') {
-    return currentTab.value === 'charges' ? 'Stay on Charges · Finance Approve' : 'Open Charges · Approve'
+    return 'Open Charges & Invoice · Approve'
   }
   if (!clearanceHeld.value && !chargesLocked.value) {
-    if (currentTab.value === 'charges') return 'Stay on Charges · Accrue'
-    return 'Open Charges'
+    return 'Open Charges & Invoice'
   }
   if (life.openTasks[0] || panelGates.value[0]) return t('jobShell.cta.completeGate')
   if (currentTab.value === 'overview') return t('jobShell.cta.openTimeline')
@@ -185,17 +196,17 @@ const ctaLabel = computed(() => {
 })
 
 const ctaHint = computed(() => {
-  if (clearanceHeld.value) return 'Tab path: Overview (checklist) → Charges → Invoice'
+  if (clearanceHeld.value) return 'Path: Overview checklist → Edit Job · Charges & Invoice spine'
   if (moneyState.value === 'invoiced' || moneyState.value === 'part_invoiced') {
     return 'Module 1 money path complete — payment chip is optional'
   }
   if (moneyState.value === 'provisioned') {
-    return 'Tab path: Charges (Finance Approve) → Invoice'
+    return 'Edit Job · Charges & Invoice (Finance Approve → Issue)'
   }
   if (moneyState.value === 'charges_approved') {
-    return 'Tab path: Invoice (Issue)'
+    return 'Edit Job · Charges & Invoice (Issue)'
   }
-  if (!clearanceHeld.value) return 'Tab path: Charges (Accrue) → Invoice (after Finance approve)'
+  if (!clearanceHeld.value) return 'Edit Job · Charges & Invoice (Accrue → Invoice after Finance approve)'
   return null
 })
 
@@ -212,9 +223,10 @@ async function loadWorkspace(id: number) {
   if (!Number.isFinite(id) || id <= 0) {
     jobStore.clear()
     life.clear()
+    charges.clear()
     return
   }
-  await Promise.all([jobStore.load(id), life.load(id)])
+  await Promise.all([jobStore.load(id), life.load(id), charges.load(id)])
 }
 
 watch(shipmentId, (id) => void loadWorkspace(id), { immediate: true })
@@ -222,14 +234,12 @@ watch(shipmentId, (id) => void loadWorkspace(id), { immediate: true })
 onUnmounted(() => {
   jobStore.clear()
   life.clear()
+  charges.clear()
 })
 
 async function onPrimaryAction() {
   if (actionCompleted.value) {
-    await router.push({
-      name: 'job-charges',
-      params: { shipmentId: String(shipmentId.value) },
-    })
+    await router.push(operateChargesLocation(shipmentId.value))
     return
   }
 
@@ -244,19 +254,14 @@ async function onPrimaryAction() {
     return
   }
 
-  if (moneyState.value === 'charges_approved') {
-    await router.push({
-      name: 'job-invoice',
-      params: { shipmentId: String(shipmentId.value) },
-    })
-    return
-  }
-
-  if (moneyUnlocked.value) {
-    await router.push({
-      name: 'job-charges',
-      params: { shipmentId: String(shipmentId.value) },
-    })
+  if (
+    moneyState.value === 'charges_approved' ||
+    moneyState.value === 'provisioned' ||
+    moneyState.value === 'invoiced' ||
+    moneyState.value === 'part_invoiced' ||
+    moneyUnlocked.value
+  ) {
+    await router.push(operateChargesLocation(shipmentId.value))
     return
   }
 
@@ -324,8 +329,6 @@ async function onPrimaryAction() {
           :gp-amount="gpAmount"
           :gp-pct="gpPct"
           :seat="tasks.role"
-          :charges-locked="chargesLocked"
-          :invoice-locked="invoiceLocked"
           :os-pulse="osPulse"
         />
 
@@ -337,7 +340,7 @@ async function onPrimaryAction() {
           >
             {{ moneyBlockMessage }}
             <span class="mt-1 block text-xs text-amber-800/80">
-              Unlock path: Overview checklist → Finance stamp → Charges → Invoice
+              Unlock path: Overview checklist → Finance stamp → Edit Job · Charges &amp; Invoice spine
             </span>
           </div>
 

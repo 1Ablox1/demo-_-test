@@ -30,6 +30,17 @@ export function emptyAuImportFields(): AuImportFields {
     commodityHs: '',
     deliveryAddress: '',
     freightTerm: '',
+    paymentTermHbl: '',
+    paymentTermMbl: '',
+    cargoSource: 'SC',
+    customsBroker: '',
+    customsRequired: '',
+    packing: '',
+    cargoType: '',
+    vessel: '',
+    op: '',
+    sales: '',
+    specialReqs: '',
     brokerRef: '',
     biosecurityRisk: '',
     permitHint: '',
@@ -44,7 +55,7 @@ export function emptyAuImportFields(): AuImportFields {
 
 /** Seed AU fields from flat shipment row when opening legacy-shaped data. */
 export function auImportFromShipment(s: ShipmentRecord): AuImportFields {
-  if (s.auImport) return { ...s.auImport }
+  if (s.auImport) return { ...emptyAuImportFields(), ...s.auImport }
   const base = emptyAuImportFields()
   const lane = lanesMatchRoute(s.route)
   if (lane) {
@@ -290,7 +301,7 @@ export function nextIncompleteStep(completion: Record<AuImportStepId, boolean>):
   for (const s of AU_IMPORT_STEPS) {
     if (!completion[s.id]) return s.id
   }
-  return 'money_preview'
+  return 'parties_delivery'
 }
 
 export function fieldToStep(field: string): AuImportStepId {
@@ -323,6 +334,20 @@ export function fieldToStep(field: string): AuImportStepId {
     deliveryAddress: 'parties_delivery',
     notifyParty: 'parties_delivery',
     freightTerm: 'customs_handoff',
+    paymentTermHbl: 'commercial',
+    paymentTermMbl: 'commercial',
+    cargoSource: 'commercial',
+    customsBroker: 'customs_handoff',
+    customsRequired: 'customs_handoff',
+    packing: 'awb_cargo',
+    cargoType: 'awb_cargo',
+    vessel: 'route',
+    flight: 'route',
+    op: 'commercial',
+    sales: 'commercial',
+    specialReqs: 'parties_delivery',
+    notes: 'parties_delivery',
+    operateType: 'commercial',
     brokerRef: 'customs_handoff',
     biosecurityRisk: 'customs_handoff',
     permitHint: 'customs_handoff',
@@ -332,6 +357,8 @@ export function fieldToStep(field: string): AuImportStepId {
     overseasFreight: 'money_preview',
     insurance: 'money_preview',
     invoiceTotal: 'money_preview',
+    customsValueAud: 'money_preview',
+    sellCurrency: 'money_preview',
   }
   return map[field] ?? 'commercial'
 }

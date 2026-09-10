@@ -15,6 +15,10 @@ export function usesEchoGateWrites(): boolean {
   return apiMode() === 'hybrid' || apiMode() === 'live'
 }
 
+/**
+ * MSW stays on for money / lifecycle / unmapped jobs in every mode until Echo
+ * exposes those writes (WIRING: live = Echo reads + MSW for unimplemented).
+ */
 export function usesMswMocks(): boolean {
-  return apiMode() === 'mock' || apiMode() === 'hybrid'
+  return apiMode() === 'mock' || apiMode() === 'hybrid' || apiMode() === 'live'
 }

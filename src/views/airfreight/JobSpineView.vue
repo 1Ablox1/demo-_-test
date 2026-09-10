@@ -5,6 +5,7 @@ import { useRoute, useRouter } from 'vue-router'
 import JobLocalFrameStrip from '@/components/airfreight/job/JobLocalFrameStrip.vue'
 import JobMgtTimeline from '@/components/airfreight/job/JobMgtTimeline.vue'
 import JobOpsTruthStrip from '@/components/airfreight/job/JobOpsTruthStrip.vue'
+import { operateChargesLocation } from '@/lib/jobMoneyNav'
 import type { MilestoneId } from '@/os/types'
 import { useJobStore } from '@/stores/job'
 import { useLifecycleStore } from '@/stores/lifecycle'
@@ -29,10 +30,8 @@ watch(
 
 function onSelectMilestone(id: MilestoneId) {
   selected.value = id
-  if (id === 'charges') {
-    void router.push({ name: 'job-charges', params: { shipmentId: String(shipmentId.value) } })
-  } else if (id === 'invoice') {
-    void router.push({ name: 'job-invoice', params: { shipmentId: String(shipmentId.value) } })
+  if (id === 'charges' || id === 'invoice') {
+    void router.push(operateChargesLocation(shipmentId.value))
   }
 }
 

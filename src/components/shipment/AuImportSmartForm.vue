@@ -5,6 +5,7 @@ import CompactField from '@/components/ui/CompactField.vue'
 import CompactSelect from '@/components/ui/CompactSelect.vue'
 import CompactTextarea from '@/components/ui/CompactTextarea.vue'
 import InheritFlashBar from '@/components/shipment/InheritFlashBar.vue'
+import JobChargesHandoffPanel from '@/components/shipment/JobChargesHandoffPanel.vue'
 import {
   AU_AIRLINE_OPTIONS,
   AU_BIOSECURITY_OPTIONS,
@@ -19,8 +20,6 @@ import {
   applyLanePick,
   applyMasterInheritance,
   applyShipperPick,
-  estimateDutyGst,
-  estimateInvoiceTotal,
   fieldToStep,
   nextIncompleteStep,
   stepCompletion,
@@ -40,6 +39,7 @@ import type {
 } from '@/types/auAirImport'
 import { AU_IMPORT_STEPS, INCO_TERMS } from '@/types/auAirImport'
 import type { ConsolidationRecord, ShipmentRecord } from '@/stores/freight'
+import type { HandoffNodeState } from '@/components/job/JobHandoffSpine.vue'
 
 const props = withDefaults(
   defineProps<{
@@ -55,6 +55,11 @@ const props = withDefaults(
     readOnly?: boolean
     /** Horizontal tabs — one segment body at a time (Jobs form UX) */
     tabMode?: boolean
+    /**
+     * Lifecycle Handoff spine states keyed by form step —
+     * chips mirror Done / Active / Held / Pending (not field-fill alone).
+     */
+    stepStates?: Partial<Record<AuImportStepId, HandoffNodeState>> | null
   }>(),
   {
     guided: false,
@@ -62,6 +67,7 @@ const props = withDefaults(
     visibleSteps: null,
     readOnly: false,
     tabMode: false,
+    stepStates: null,
   },
 )
 
@@ -161,16 +167,66 @@ const consigneeOptions = computed(() =>
 const laneOptions = computed(() => AU_LANES.map((l) => ({ value: l.id, label: l.label })))
 const incoOptions = computed(() => INCO_TERMS.map((t) => ({ value: t, label: t })))
 const completion = computed(() => stepCompletion(props.auFields, props.shipment))
-const progress = computed(() => stepProgress(completion.value))
+const progress = computed(() => {
+  if (props.stepStates) {
+    const ids = navSteps.value.map((s) => s.id)
+    if (ids.length) {
+      const done = ids.filter((id) => {
+        const st = props.stepStates?.[id]
+        return st === 'done' || (st == null && completion.value[id])
+      }).length
+      return Math.round((done / ids.length) * 100)
+    }
+  }
+  return stepProgress(completion.value)
+})
 const suggestedNext = computed(() => nextIncompleteStep(completion.value))
-const estimatedTotal = computed(
-  () => estimateInvoiceTotal(props.auFields) || props.auFields.invoiceTotal,
-)
-const dutyGstEst = computed(() => estimateDutyGst(props.auFields))
 
-function applyDutyGstEstimate() {
-  const { duty, gst } = dutyGstEst.value
-  patchAu({ dutyAmountEst: duty, gstAmountEst: gst })
+const chargesShipmentId = computed(() => {
+  const n = Number(props.shipment.id)
+  return Number.isFinite(n) && n > 0 ? n : 0
+})
+
+/** Chip state mirrors Lifecycle Handoff; fall back to field completion. */
+function chipState(stepId: AuImportStepId): HandoffNodeState {
+  const fromSpine = props.stepStates?.[stepId]
+  if (fromSpine) return fromSpine
+  if (activeStep.value === stepId) return 'active'
+  if (completion.value[stepId]) return 'done'
+  return 'pending'
+}
+
+function chipClass(stepId: AuImportStepId): string {
+  const state = chipState(stepId)
+  const selected = activeStep.value === stepId
+  if (state === 'held') {
+    return selected
+      ? 'border-amber-400 bg-amber-50 text-amber-950 ring-1 ring-amber-200'
+      : 'border-amber-200 bg-amber-50/80 text-amber-900'
+  }
+  if (state === 'active' || selected) {
+    return 'border-teal-300 bg-primary-tint text-teal-900 ring-1 ring-teal-200/80'
+  }
+  if (state === 'done') {
+    return 'border-emerald-200 bg-emerald-50 text-emerald-900'
+  }
+  return 'border-border bg-white text-slate-500 hover:border-slate-300 hover:bg-slate-50'
+}
+
+function chipDotClass(stepId: AuImportStepId): string {
+  const state = chipState(stepId)
+  if (state === 'done') return 'bg-emerald-600'
+  if (state === 'active') return 'bg-teal-600'
+  if (state === 'held') return 'bg-amber-600'
+  return 'bg-slate-400'
+}
+
+function chipBadge(stepId: AuImportStepId): string {
+  const state = chipState(stepId)
+  if (state === 'done') return 'Done'
+  if (state === 'active') return 'Active'
+  if (state === 'held') return 'Held'
+  return 'Pending'
 }
 
 function setSectionRef(id: string, el: unknown) {
@@ -186,20 +242,22 @@ function goStep(id: AuImportStepId, fieldKey?: string, opts?: { scroll?: boolean
     id = props.focusStep ?? props.visibleSteps[0]!
   }
 
-  const key =
+  // Prefer an in-step field for spotlight; never let an unmapped focusKey remap the step
+  // (bug: sellCurrency fell through fieldToStep → commercial / Booking).
+  let key =
     fieldKey ?? firstIncompleteFieldInStep(id, props.auFields, props.shipment) ?? undefined
-  const sectionId = (key ? fieldToStep(key) : id) as AuImportStepId
-  const target =
-    props.guided && props.focusStep
-      ? props.focusStep
-      : sectionId
+  if (key && fieldToStep(key) !== id) {
+    key = firstIncompleteFieldInStep(id, props.auFields, props.shipment) ?? undefined
+  }
+
+  const target = props.guided && props.focusStep ? props.focusStep : id
 
   activeStep.value = target
 
   // Immutable open map so Vue always re-renders section bodies
   const nextOpen = { ...open.value }
   for (const s of AU_IMPORT_STEPS) {
-    nextOpen[s.id] = props.guided ? s.id === target : s.id === sectionId || s.id === id
+    nextOpen[s.id] = s.id === target
   }
   if (!nextOpen[target]) nextOpen[target] = true
   open.value = nextOpen
@@ -209,11 +267,11 @@ function goStep(id: AuImportStepId, fieldKey?: string, opts?: { scroll?: boolean
   nextTick(() => {
     try {
       const root = formRoot.value ?? undefined
-      if (key && (!props.guided || fieldToStep(key) === target)) {
+      if (key && fieldToStep(key) === target) {
         const jumped = jumpToFieldKey(key, { root, behavior: 'smooth', focus: true })
         if (jumped) return
       }
-      const section = sectionRefs.value[target] ?? sectionRefs.value[sectionId] ?? sectionRefs.value[id]
+      const section = sectionRefs.value[target] ?? sectionRefs.value[id]
       if (section) {
         jumpToSectionElement(section, { behavior: 'smooth' })
         return
@@ -328,6 +386,34 @@ function patchShipment(patch: Partial<ShipmentRecord>) {
   emit('update:shipment', patch)
 }
 
+function patchFlight(value: string) {
+  if (props.readOnly) return
+  emit('update:shipment', {
+    extras: { ...(props.shipment.extras ?? {}), flight: value },
+  })
+}
+
+const operateTypeOptions = [
+  { value: 'direct', label: 'Direct' },
+  { value: 'console', label: 'Console' },
+  { value: 'back_to_back', label: 'Back-to-back' },
+]
+
+const cargoSourceOptions = [
+  { value: 'SC', label: 'SC · Sales' },
+  { value: 'NC', label: 'NC · Nominated' },
+]
+
+const paymentTermOptions = [
+  { value: 'PP', label: 'Prepaid (PP)' },
+  { value: 'CC', label: 'Collect (CC)' },
+]
+
+const customsYnOptions = [
+  { value: 'Y', label: 'Yes — customs required' },
+  { value: 'N', label: 'No' },
+]
+
 function onIncoTerm(term: string) {
   const freightTerm: AuFreightTerm =
     term === 'CIF' || term === 'CFR' ? 'prepaid' : term === 'FOB' || term === 'EXW' ? 'collect' : ''
@@ -348,24 +434,26 @@ defineExpose({ goStep, jumpToField })
 </script>
 
 <template>
-  <div ref="formRoot" class="space-y-2">
-    <div class="os-panel flex flex-wrap items-center justify-between gap-2 px-3 py-2">
-      <div>
-        <div class="text-[10px] font-bold uppercase tracking-wider text-teal-700">AU Air Import</div>
-        <p class="text-[11px] text-muted-foreground">
+  <div ref="formRoot" class="space-y-2.5">
+    <div class="os-panel flex flex-wrap items-center justify-between gap-3 px-3 py-2.5">
+      <div class="min-w-0">
+        <div class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Field stages · mirrors Lifecycle handoff
+        </div>
+        <p class="mt-0.5 text-[11px] text-muted-foreground">
           <template v-if="guided">Your seat · one gate at a time · Hand off when Ops is done</template>
-          <template v-else>Operate fields · AU / international names · not N10 Section C</template>
+          <template v-else>Same cycle as the spine above · click a stage to jump · AU Local Frame</template>
         </p>
       </div>
       <div class="flex items-center gap-2">
-        <div class="h-1.5 w-20 overflow-hidden rounded-full bg-slate-200">
+        <div class="h-1.5 w-24 overflow-hidden rounded-full bg-slate-200">
           <div class="h-full rounded-full bg-primary transition-all" :style="{ width: `${progress}%` }" />
         </div>
         <span class="font-mono text-[10px] font-semibold text-slate-500">{{ progress }}%</span>
         <button
           v-if="!guided && progress < 100"
           type="button"
-          class="flex items-center gap-0.5 text-[11px] font-medium text-primary hover:underline"
+          class="flex items-center gap-0.5 rounded-md border border-teal-200 bg-teal-50 px-2 py-1 text-[11px] font-semibold text-teal-900 hover:bg-teal-100"
           @click="goStep(suggestedNext)"
         >
           Next
@@ -374,29 +462,35 @@ defineExpose({ goStep, jumpToField })
       </div>
     </div>
 
-    <nav class="flex flex-wrap gap-1">
+    <nav class="flex flex-wrap gap-1.5" aria-label="Lifecycle field stages">
       <button
-        v-for="step in navSteps"
+        v-for="(step, i) in navSteps"
         :key="step.id"
         type="button"
-        class="flex items-center gap-1 rounded-md border px-2 py-1 text-[10px] font-semibold"
-        :class="
-          activeStep === step.id
-            ? 'border-teal-300 bg-primary-tint text-teal-800'
-            : completion[step.id]
-              ? 'border-emerald-200 bg-emerald-50 text-emerald-800'
-              : 'border-border text-muted-foreground hover:bg-muted'
-        "
+        class="group flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-left transition-colors"
+        :class="chipClass(step.id)"
         :disabled="guided && !tabMode && focusStep !== step.id"
+        :title="`${step.hint} · ${chipBadge(step.id)}`"
         @click="onStepNavClick(step.id)"
       >
-        <Check v-if="completion[step.id]" :size="11" />
         <span
-          v-else
-          class="field-validation-dot"
-          title="Missing required fields — click to jump"
+          class="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
+          :class="chipDotClass(step.id)"
         />
-        {{ step.label }}
+        <span class="text-[10px] font-semibold tabular-nums text-slate-400">{{ i + 1 }}</span>
+        <span class="text-[10px] font-semibold tracking-tight">{{ step.label }}</span>
+        <span
+          class="os-badge os-badge--micro shrink-0"
+          :class="{
+            'os-badge--green': chipState(step.id) === 'done',
+            'os-badge--teal': chipState(step.id) === 'active',
+            'os-badge--amber': chipState(step.id) === 'held',
+            'os-badge--slate': chipState(step.id) === 'pending',
+          }"
+        >
+          <Check v-if="chipState(step.id) === 'done'" :size="9" :stroke-width="3" />
+          {{ chipBadge(step.id) }}
+        </span>
       </button>
     </nav>
 
@@ -427,6 +521,22 @@ defineExpose({ goStep, jumpToField })
         Booking — importer & terms
       </div>
       <div v-if="tabMode || open.commercial" class="grid grid-cols-2 gap-2 border-t border-border px-3 pb-3 pt-2 lg:grid-cols-3">
+        <CompactSelect
+          :model-value="shipment.operateType"
+          field-key="operateType"
+          label="Operate type"
+          hint="Direct · Console · B2B"
+          :options="operateTypeOptions"
+          @update:model-value="patchShipment({ operateType: $event as ShipmentRecord['operateType'] })"
+        />
+        <CompactSelect
+          :model-value="auFields.cargoSource"
+          field-key="cargoSource"
+          label="Freight canvassing"
+          hint="SC / NC"
+          :options="cargoSourceOptions"
+          @update:model-value="patchAu({ cargoSource: $event as AuImportFields['cargoSource'] })"
+        />
         <CompactSelect
           :model-value="auFields.customerId"
           field-key="customerId"
@@ -460,6 +570,20 @@ defineExpose({ goStep, jumpToField })
           :options="incoOptions"
           @update:model-value="onIncoTerm($event)"
         />
+        <CompactSelect
+          :model-value="auFields.paymentTermHbl"
+          field-key="paymentTermHbl"
+          label="HAWB freight terms"
+          :options="paymentTermOptions"
+          @update:model-value="patchAu({ paymentTermHbl: $event })"
+        />
+        <CompactSelect
+          :model-value="auFields.paymentTermMbl"
+          field-key="paymentTermMbl"
+          label="MAWB freight terms"
+          :options="paymentTermOptions"
+          @update:model-value="patchAu({ paymentTermMbl: $event })"
+        />
         <CompactField
           :model-value="auFields.ownerAbn"
           field-key="ownerAbn"
@@ -467,6 +591,19 @@ defineExpose({ goStep, jumpToField })
           hint="11 digits (AU)"
           mono
           @update:model-value="patchAu({ ownerAbn: String($event) })"
+        />
+        <CompactField
+          :model-value="auFields.op"
+          field-key="op"
+          label="Operator"
+          hint="Ops user"
+          @update:model-value="patchAu({ op: String($event) })"
+        />
+        <CompactField
+          :model-value="auFields.sales"
+          field-key="sales"
+          label="Sales"
+          @update:model-value="patchAu({ sales: String($event) })"
         />
         <p v-if="auFields.customerId" class="col-span-2 self-end text-[10px] text-muted-foreground lg:col-span-1">
           {{ partyById(auFields.customerId)?.abnHint }}
@@ -481,6 +618,7 @@ defineExpose({ goStep, jumpToField })
       class="os-panel overflow-hidden"
     >
       <button
+        v-if="!tabMode"
         type="button"
         class="flex w-full items-center justify-between px-3 py-2 text-left"
         @click="toggle('route')"
@@ -502,6 +640,23 @@ defineExpose({ goStep, jumpToField })
           <ChevronRight v-else :size="14" class="text-slate-400" />
         </div>
       </button>
+      <div
+        v-if="tabMode"
+        class="flex items-center justify-between border-b border-border px-3 py-2"
+      >
+        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          Flight — ports & schedule
+        </span>
+        <button
+          v-if="consolidation && shipment.kind === 'house'"
+          type="button"
+          class="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] font-medium"
+          @click="inheritFromMaster"
+        >
+          <Link2 :size="11" />
+          Pull master
+        </button>
+      </div>
       <div v-if="tabMode || open.route" class="grid grid-cols-2 gap-2 border-t border-border px-3 pb-3 pt-2 lg:grid-cols-3">
         <CompactSelect
           :model-value="auFields.laneId"
@@ -578,7 +733,89 @@ defineExpose({ goStep, jumpToField })
           field-key="flight"
           label="Flight No"
           mono
+          hint="voyageFlight"
           :inherit-hint="inheritHint"
+          @update:model-value="patchFlight(String($event))"
+        />
+        <CompactField
+          :model-value="auFields.vessel"
+          field-key="vessel"
+          label="Aircraft / vessel"
+          @update:model-value="patchAu({ vessel: String($event) })"
+        />
+      </div>
+    </div>
+
+    <!-- Customs -->
+    <div
+      v-if="showStep('customs_handoff')"
+      :ref="(el) => setSectionRef('customs_handoff', el)"
+      class="overflow-hidden rounded-lg border border-amber-200/80 bg-amber-50/40"
+    >
+      <button
+        v-if="!tabMode"
+        type="button"
+        class="flex w-full items-center justify-between px-3 py-2 text-left"
+        @click="toggle('customs_handoff')"
+      >
+        <span class="text-[10px] font-bold uppercase tracking-wider text-amber-900">
+          3 · Customs entry
+        </span>
+        <ChevronDown v-if="open.customs_handoff" :size="14" class="text-amber-700/60" />
+        <ChevronRight v-else :size="14" class="text-amber-700/60" />
+      </button>
+      <div
+        v-if="tabMode"
+        class="border-b border-amber-200/60 px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-amber-900"
+      >
+        Customs entry
+      </div>
+      <div
+        v-if="tabMode || open.customs_handoff"
+        class="grid grid-cols-2 gap-2 border-t border-amber-200/60 px-3 pb-3 pt-2 lg:grid-cols-3"
+      >
+        <CompactField
+          :model-value="auFields.brokerRef"
+          field-key="brokerRef"
+          label="Customs broker reference"
+          mono
+          required
+          @update:model-value="patchAu({ brokerRef: String($event) })"
+        />
+        <CompactField
+          :model-value="auFields.customsBroker"
+          field-key="customsBroker"
+          label="Customs broker"
+          hint="Party name"
+          @update:model-value="patchAu({ customsBroker: String($event) })"
+        />
+        <CompactSelect
+          :model-value="auFields.customsRequired"
+          field-key="customsRequired"
+          label="Customs required"
+          :options="customsYnOptions"
+          @update:model-value="patchAu({ customsRequired: $event as AuImportFields['customsRequired'] })"
+        />
+        <CompactSelect
+          :model-value="auFields.freightTerm"
+          field-key="freightTerm"
+          label="Freight terms"
+          :options="AU_FREIGHT_TERM_OPTIONS"
+          @update:model-value="patchAu({ freightTerm: $event as AuFreightTerm })"
+        />
+        <CompactSelect
+          :model-value="auFields.biosecurityRisk"
+          field-key="biosecurityRisk"
+          label="DAFF / biosecurity"
+          :options="AU_BIOSECURITY_OPTIONS"
+          @update:model-value="patchAu({ biosecurityRisk: $event as AuBiosecurityRisk })"
+        />
+        <CompactField
+          :model-value="auFields.permitHint"
+          field-key="permitHint"
+          label="Permit / treatment"
+          class="col-span-2 lg:col-span-3"
+          @update:model-value="patchAu({ permitHint: String($event) })"
         />
       </div>
     </div>
@@ -590,16 +827,23 @@ defineExpose({ goStep, jumpToField })
       class="os-panel overflow-hidden"
     >
       <button
+        v-if="!tabMode"
         type="button"
         class="flex w-full items-center justify-between px-3 py-2 text-left"
         @click="toggle('awb_cargo')"
       >
         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-          3 · AWB & cargo
+          4 · Cargo arrival — AWB & cargo
         </span>
         <ChevronDown v-if="open.awb_cargo" :size="14" class="text-slate-400" />
         <ChevronRight v-else :size="14" class="text-slate-400" />
       </button>
+      <div
+        v-if="tabMode"
+        class="border-b border-border px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500"
+      >
+        Cargo arrival — AWB & cargo
+      </div>
       <div v-if="tabMode || open.awb_cargo" class="space-y-2 border-t border-border px-3 pb-3 pt-2">
         <div class="grid grid-cols-2 gap-2 lg:grid-cols-3">
           <CompactField
@@ -654,8 +898,19 @@ defineExpose({ goStep, jumpToField })
             field-key="commodityHs"
             label="HS code (hint)"
             mono
-            class="col-span-2 lg:col-span-2"
             @update:model-value="patchAu({ commodityHs: String($event) })"
+          />
+          <CompactField
+            :model-value="auFields.packing"
+            field-key="packing"
+            label="Packing"
+            @update:model-value="patchAu({ packing: String($event) })"
+          />
+          <CompactField
+            :model-value="auFields.cargoType"
+            field-key="cargoType"
+            label="Cargo type"
+            @update:model-value="patchAu({ cargoType: String($event) })"
           />
         </div>
         <CompactTextarea
@@ -754,23 +1009,62 @@ defineExpose({ goStep, jumpToField })
       </div>
     </div>
 
-    <!-- Parties -->
+    <!-- Money — spine 5 · Charges & Invoice (Unified Ledger) -->
+    <div
+      v-if="showStep('money_preview')"
+      :ref="(el) => setSectionRef('money_preview', el)"
+      class="os-panel overflow-hidden"
+    >
+      <button
+        v-if="!tabMode"
+        type="button"
+        class="flex w-full items-center justify-between px-3 py-2 text-left"
+        @click="toggle('money_preview')"
+      >
+        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+          5 · Charges & Invoice
+        </span>
+        <ChevronDown v-if="open.money_preview" :size="14" class="text-slate-400" />
+        <ChevronRight v-else :size="14" class="text-slate-400" />
+      </button>
+      <div
+        v-if="tabMode"
+        class="border-b border-border px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500"
+      >
+        Charges & Invoice
+      </div>
+      <div v-if="tabMode || open.money_preview" class="space-y-3 border-t border-border px-3 pb-3 pt-2">
+        <JobChargesHandoffPanel v-if="chargesShipmentId > 0" :shipment-id="chargesShipmentId" />
+        <p v-else class="py-6 text-center text-[12px] text-muted-foreground">
+          Save the job to load Unified Ledger charges.
+        </p>
+      </div>
+    </div>
+
+    <!-- Parties — spine 6 · Final Delivery -->
     <div
       v-if="showStep('parties_delivery')"
       :ref="(el) => setSectionRef('parties_delivery', el)"
       class="os-panel overflow-hidden"
     >
       <button
+        v-if="!tabMode"
         type="button"
         class="flex w-full items-center justify-between px-3 py-2 text-left"
         @click="toggle('parties_delivery')"
       >
         <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-          4 · Delivery — parties & address
+          6 · Final delivery — parties & address
         </span>
         <ChevronDown v-if="open.parties_delivery" :size="14" class="text-slate-400" />
         <ChevronRight v-else :size="14" class="text-slate-400" />
       </button>
+      <div
+        v-if="tabMode"
+        class="border-b border-border px-3 py-2 text-[10px] font-bold uppercase tracking-wider text-slate-500"
+      >
+        Final delivery — parties & address
+      </div>
       <div
         v-if="tabMode || open.parties_delivery"
         class="grid grid-cols-2 gap-2 border-t border-border px-3 pb-3 pt-2"
@@ -804,102 +1098,22 @@ defineExpose({ goStep, jumpToField })
           :rows="2"
           @update:model-value="patchAu({ deliveryAddress: $event })"
         />
-      </div>
-    </div>
-
-    <!-- Customs -->
-    <div
-      v-if="showStep('customs_handoff')"
-      :ref="(el) => setSectionRef('customs_handoff', el)"
-      class="overflow-hidden rounded-lg border border-amber-200/80 bg-amber-50/40"
-    >
-      <button
-        type="button"
-        class="flex w-full items-center justify-between px-3 py-2 text-left"
-        @click="toggle('customs_handoff')"
-      >
-        <span class="text-[10px] font-bold uppercase tracking-wider text-amber-900">
-          5 · Customs entry
-        </span>
-        <ChevronDown v-if="open.customs_handoff" :size="14" class="text-amber-700/60" />
-        <ChevronRight v-else :size="14" class="text-amber-700/60" />
-      </button>
-      <div
-        v-if="tabMode || open.customs_handoff"
-        class="grid grid-cols-2 gap-2 border-t border-amber-200/60 px-3 pb-3 pt-2 lg:grid-cols-3"
-      >
-        <CompactField
-          :model-value="auFields.brokerRef"
-          field-key="brokerRef"
-          label="Customs broker reference"
-          mono
-          required
-          @update:model-value="patchAu({ brokerRef: String($event) })"
+        <CompactTextarea
+          :model-value="shipment.notes"
+          field-key="notes"
+          label="Remarks"
+          class="col-span-2"
+          :rows="2"
+          @update:model-value="patchShipment({ notes: $event })"
         />
-        <CompactSelect
-          :model-value="auFields.freightTerm"
-          field-key="freightTerm"
-          label="Freight terms"
-          :options="AU_FREIGHT_TERM_OPTIONS"
-          @update:model-value="patchAu({ freightTerm: $event as AuFreightTerm })"
+        <CompactTextarea
+          :model-value="auFields.specialReqs"
+          field-key="specialReqs"
+          label="Special requirements"
+          class="col-span-2"
+          :rows="2"
+          @update:model-value="patchAu({ specialReqs: $event })"
         />
-        <CompactSelect
-          :model-value="auFields.biosecurityRisk"
-          field-key="biosecurityRisk"
-          label="DAFF / biosecurity"
-          :options="AU_BIOSECURITY_OPTIONS"
-          @update:model-value="patchAu({ biosecurityRisk: $event as AuBiosecurityRisk })"
-        />
-        <CompactField
-          :model-value="auFields.permitHint"
-          field-key="permitHint"
-          label="Permit / treatment"
-          class="col-span-2 lg:col-span-3"
-          @update:model-value="patchAu({ permitHint: String($event) })"
-        />
-      </div>
-    </div>
-
-    <!-- Money -->
-    <div
-      v-if="showStep('money_preview')"
-      :ref="(el) => setSectionRef('money_preview', el)"
-      class="os-panel overflow-hidden border-dashed"
-    >
-      <button
-        type="button"
-        class="flex w-full items-center justify-between px-3 py-2 text-left"
-        @click="toggle('money_preview')"
-      >
-        <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-          6 · Duty & GST (estimates)
-        </span>
-        <ChevronDown v-if="open.money_preview" :size="14" class="text-slate-400" />
-        <ChevronRight v-else :size="14" class="text-slate-400" />
-      </button>
-      <div v-if="tabMode || open.money_preview" class="space-y-2 border-t border-border px-3 pb-3 pt-2">
-        <div class="grid grid-cols-2 gap-2 lg:grid-cols-3">
-          <CompactField :model-value="auFields.overseasFreight" label="Overseas freight" mono disabled />
-          <CompactField :model-value="auFields.insurance" label="Insurance" mono disabled />
-          <CompactField :model-value="estimatedTotal" label="Invoice total (est.)" mono disabled />
-          <CompactField
-            :model-value="auFields.dutyAmountEst"
-            field-key="dutyAmountEst"
-            label="Duty (est.)"
-            mono
-            @update:model-value="patchAu({ dutyAmountEst: String($event) })"
-          />
-          <CompactField
-            :model-value="auFields.gstAmountEst"
-            field-key="gstAmountEst"
-            label="GST (est.)"
-            mono
-            @update:model-value="patchAu({ gstAmountEst: String($event) })"
-          />
-        </div>
-        <button type="button" class="text-[11px] font-medium text-primary hover:underline" @click="applyDutyGstEstimate">
-          Estimate duty & GST from customs value
-        </button>
       </div>
     </div>
   </div>

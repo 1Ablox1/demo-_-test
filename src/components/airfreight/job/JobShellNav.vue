@@ -2,11 +2,12 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
-import { Lock, User } from '@lucide/vue'
+import { User } from '@lucide/vue'
 import type { ActingRole, MarketPack } from '@/api/types'
 import { Badge } from '@/components/ui/badge'
 
-export type JobShellTab = 'overview' | 'timeline' | 'charges' | 'invoice'
+/** Overview desk nav only — money work lives on Job operate spine (Charges & Invoice). */
+export type JobShellTab = 'overview' | 'timeline'
 
 const props = defineProps<{
   shipmentId: number | string
@@ -18,8 +19,6 @@ const props = defineProps<{
   gpAmount: string
   gpPct: string
   seat: ActingRole
-  chargesLocked?: boolean
-  invoiceLocked?: boolean
   osPulse?: boolean
 }>()
 
@@ -35,22 +34,8 @@ const packChips = computed(() => {
 })
 
 const tabs = computed(() => [
-  { id: 'overview' as const, label: 'Overview', locked: false, name: 'job-context' as const },
-  { id: 'timeline' as const, label: 'Timeline', locked: false, name: 'job-spine' as const, mgt: true },
-  {
-    id: 'charges' as const,
-    label: 'Charges',
-    locked: Boolean(props.chargesLocked),
-    name: 'job-charges' as const,
-    lockHint: 'Locked while AU clearance is held — complete checklist + stamp on Overview first.',
-  },
-  {
-    id: 'invoice' as const,
-    label: 'Invoice',
-    locked: Boolean(props.invoiceLocked),
-    name: 'job-invoice' as const,
-    lockHint: 'Locked until clearance Cleared (and usually after Charges Accrue + Finance approve).',
-  },
+  { id: 'overview' as const, label: 'Overview', name: 'job-context' as const },
+  { id: 'timeline' as const, label: 'Timeline', name: 'job-spine' as const, mgt: true },
 ])
 
 function goTab(tab: (typeof tabs.value)[number]) {
@@ -93,24 +78,14 @@ function goTab(tab: (typeof tabs.value)[number]) {
         :class="[
           current === tab.id
             ? 'bg-primary-tint font-semibold text-primary'
-            : tab.locked
-              ? 'cursor-pointer font-normal text-muted-foreground/70 hover:bg-muted/60 hover:text-muted-foreground'
-              : 'font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+            : 'font-normal text-muted-foreground hover:bg-muted/60 hover:text-foreground',
         ]"
         :aria-selected="current === tab.id"
-        :title="tab.locked ? tab.lockHint : undefined"
         @click="goTab(tab)"
       >
         <span
           v-if="current === tab.id"
           class="absolute -left-2 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-sm bg-primary"
-        />
-        <Lock
-          v-if="tab.locked"
-          :size="12"
-          :stroke-width="1.75"
-          class="shrink-0 text-muted-foreground"
-          aria-hidden="true"
         />
         <span class="flex-1">{{ tab.label }}</span>
         <span

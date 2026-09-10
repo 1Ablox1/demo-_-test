@@ -46,8 +46,37 @@ const structureLabel = computed(() => {
         <dd>{{ draft.customer || '—' }}</dd>
       </div>
       <div>
+        <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Airline</dt>
+        <dd>{{ draft.airline || '—' }}</dd>
+      </div>
+      <div>
         <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Route</dt>
         <dd class="font-mono">{{ draft.origin }} → {{ draft.destination }}</dd>
+      </div>
+      <div>
+        <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Flight</dt>
+        <dd class="font-mono">{{ draft.voyageFlight || '—' }}{{ draft.vessel ? ` · ${draft.vessel}` : '' }}</dd>
+      </div>
+      <div>
+        <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Terms</dt>
+        <dd class="font-mono text-[12px]">
+          {{ draft.incoTerm || '—' }} · {{ draft.freightTerm || '—' }} · H {{ draft.paymentTermHbl || '—' }} · M
+          {{ draft.paymentTermMbl || '—' }}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Ops</dt>
+        <dd class="text-[12px]">
+          {{ draft.op || '—' }} · {{ draft.opDepartment || draft.opOffice || '—' }}
+        </dd>
+      </div>
+      <div>
+        <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Customs</dt>
+        <dd class="text-[12px]">
+          {{ draft.customsRequired === 'Y' ? 'Required' : draft.customsRequired === 'N' ? 'No' : '—' }}
+          <span v-if="draft.customsBroker"> · {{ draft.customsBroker }}</span>
+          <span v-if="draft.hsCode" class="font-mono"> · HS {{ draft.hsCode }}</span>
+        </dd>
       </div>
       <div>
         <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Cargo</dt>
@@ -65,6 +94,15 @@ const structureLabel = computed(() => {
         <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Billing</dt>
         <dd class="font-mono">
           AR ${{ totals.ar.toLocaleString() }} · margin ${{ totals.margin.toLocaleString() }}
+        </dd>
+      </div>
+      <div v-if="draft.notes || draft.specialReqs" class="sm:col-span-2">
+        <dt class="text-[10px] font-bold uppercase tracking-wider text-slate-400">Remarks</dt>
+        <dd class="text-[12px] text-slate-700">
+          {{ draft.notes || '—' }}
+          <span v-if="draft.specialReqs" class="mt-1 block text-slate-500">
+            Special: {{ draft.specialReqs }}
+          </span>
         </dd>
       </div>
       <div v-if="draft.structure !== 'direct'" class="sm:col-span-2">

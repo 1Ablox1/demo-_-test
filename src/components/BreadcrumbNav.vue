@@ -27,8 +27,6 @@ interface Crumb {
 const JOB_TABS: { name: string; label: string }[] = [
   { name: 'job-context', label: 'Overview' },
   { name: 'job-spine', label: 'Timeline' },
-  { name: 'job-charges', label: 'Charges' },
-  { name: 'job-invoice', label: 'Invoice' },
 ]
 
 const BILLING_TABS = [
@@ -65,22 +63,12 @@ function jobRelatedLinks(shipmentId: string, exclude?: string): CrumbLink[] {
       to: { name: 'job-spine', params: { shipmentId } },
     },
     {
-      key: 'charges',
-      label: 'Charges',
-      to: { name: 'job-charges', params: { shipmentId } },
-    },
-    {
-      key: 'invoice',
-      label: 'Invoice',
-      to: { name: 'job-invoice', params: { shipmentId } },
-    },
-    {
       key: 'edit',
-      label: 'Edit booking',
+      label: 'Edit Job · Charges & Invoice',
       to: {
         name: 'shipment',
         params: { shipmentId },
-        query: { from: 'overview' },
+        query: { step: 'money_preview', from: 'overview' },
       },
     },
     {
@@ -344,15 +332,7 @@ const crumbs = computed<Crumb[]>(() => {
       name === 'job-billing' || name === 'job-documents' ? 'job-context' : name
     const tab = JOB_TABS.find((t) => t.name === tabName) ?? JOB_TABS[0]!
     const excludeKey =
-      tab.name === 'job-context'
-        ? 'overview'
-        : tab.name === 'job-spine'
-          ? 'timeline'
-          : tab.name === 'job-charges'
-            ? 'charges'
-            : tab.name === 'job-invoice'
-              ? 'invoice'
-              : 'overview'
+      tab.name === 'job-spine' ? 'timeline' : tab.name === 'job-context' ? 'overview' : 'overview'
 
     items.push({ label: 'Air Freight' })
     {

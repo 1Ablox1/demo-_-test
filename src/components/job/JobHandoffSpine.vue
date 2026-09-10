@@ -2,6 +2,7 @@
 import { computed, ref } from 'vue'
 import { ChevronRight } from '@lucide/vue'
 import { operatorLabel } from '@/data/seatOperators'
+import { AU_SPINE_ACCOUNTABLE } from '@/lib/auLifecycle'
 
 export type HandoffNodeId =
   | 'booking'
@@ -9,6 +10,7 @@ export type HandoffNodeId =
   | 'customs'
   | 'arrival'
   | 'delivery'
+  | 'billing'
 
 export type HandoffNodeState = 'done' | 'active' | 'pending' | 'held'
 
@@ -21,6 +23,12 @@ export interface HandoffNode {
   raci: 'R' | 'A' | 'C' | 'I'
   sla: string
   section?: string
+  /** Override badge text (e.g. HELD: DAFF/ICS) */
+  stateBadge?: string
+  /** Override Accountable line in popover */
+  accountable?: string
+  /** Primary field key for spotlight jump */
+  focusKey?: string
 }
 
 const props = withDefaults(
@@ -49,7 +57,8 @@ const defaultNodes: HandoffNode[] = [
     owner: operatorLabel('bookingOps'),
     raci: 'R',
     sla: 'SLA met',
-    section: 'split',
+    section: 'commercial',
+    focusKey: 'customerId',
   },
   {
     id: 'flight',
@@ -60,6 +69,7 @@ const defaultNodes: HandoffNode[] = [
     raci: 'R',
     sla: 'Departed on time',
     section: 'route',
+    focusKey: 'etd',
   },
   {
     id: 'customs',
@@ -70,6 +80,8 @@ const defaultNodes: HandoffNode[] = [
     raci: 'R',
     sla: '4h 12m remaining',
     section: 'customs_handoff',
+    stateBadge: 'HELD: DAFF/ICS',
+    focusKey: 'brokerRef',
   },
   {
     id: 'arrival',
@@ -80,16 +92,29 @@ const defaultNodes: HandoffNode[] = [
     raci: 'R',
     sla: 'ETA window open',
     section: 'awb_cargo',
+    focusKey: 'hawb',
+  },
+  {
+    id: 'billing',
+    label: 'Charges & Invoice',
+    short: '5. Charges & Invoice',
+    state: 'pending',
+    owner: operatorLabel('invoiceDesk'),
+    raci: 'A',
+    sla: 'Unified Ledger · ATO GST · AP/AR',
+    section: 'money_preview',
+    focusKey: 'customsValueAud',
   },
   {
     id: 'delivery',
     label: 'Final Delivery',
-    short: '5. Final Delivery',
+    short: '6. Final Delivery',
     state: 'pending',
     owner: operatorLabel('deliveryDesk'),
     raci: 'R',
-    sla: 'Not started',
+    sla: 'Cartage / D/O · POD unlocks invoice',
     section: 'parties_delivery',
+    focusKey: 'deliveryAddress',
   },
 ]
 
@@ -102,10 +127,31 @@ function stateClass(s: HandoffNodeState) {
   return 'os-badge--slate'
 }
 
-function stateLabel(s: HandoffNodeState) {
-  if (s === 'done') return 'Done'
-  if (s === 'active') return 'Active'
-  if (s === 'held') return 'Held'
+function nodeShellClass(node: HandoffNode) {
+  const selected = props.activeId === node.id || hoverId.value === node.id
+  if (node.state === 'held') {
+    return selected
+      ? 'border-amber-400 bg-amber-50/90 ring-1 ring-amber-200/80'
+      : 'border-amber-200 bg-amber-50/50 hover:border-amber-300'
+  }
+  if (node.state === 'active' || selected) {
+    return 'border-teal-300 bg-primary-tint/50 ring-1 ring-teal-200/70'
+  }
+  if (node.state === 'done') {
+    return selected
+      ? 'border-emerald-300 bg-emerald-50/80 ring-1 ring-emerald-200/70'
+      : 'border-emerald-200/80 bg-emerald-50/40 hover:border-emerald-300'
+  }
+  return selected
+    ? 'border-teal-300 bg-primary-tint/40'
+    : 'border-border bg-white hover:border-slate-300 hover:bg-slate-50'
+}
+
+function badgeText(node: HandoffNode) {
+  if (node.stateBadge) return node.stateBadge
+  if (node.state === 'done') return 'Done'
+  if (node.state === 'active') return 'Active'
+  if (node.state === 'held') return 'Held'
   return 'Pending'
 }
 
@@ -115,15 +161,22 @@ function raciClass(m: string) {
   if (m === 'C') return 'border-amber-300 bg-amber-50 text-amber-900'
   return 'border-slate-300 bg-slate-50 text-slate-600'
 }
+
+function accountableLine(node: HandoffNode) {
+  return node.accountable ?? AU_SPINE_ACCOUNTABLE[node.id]
+}
 </script>
 
 <template>
-  <div class="job-handoff-spine shrink-0 border-b border-border bg-card px-3 py-2" data-sticky-region="handoff-spine">
+  <div
+    class="job-handoff-spine shrink-0 border-b border-border bg-card px-3 py-2"
+    data-sticky-region="handoff-spine"
+  >
     <div class="mb-1.5 flex items-center justify-between">
       <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
         Lifecycle handoff
       </span>
-      <span class="text-[10px] text-muted-foreground">Hover for SLA · click to jump</span>
+      <span class="text-[10px] text-muted-foreground">Hover for SLA · click to jump · spotlight focus</span>
     </div>
     <ol class="flex flex-wrap items-stretch gap-1">
       <li
@@ -134,11 +187,8 @@ function raciClass(m: string) {
         <button
           type="button"
           class="handoff-node group relative flex w-full min-w-[120px] flex-col gap-1 rounded-lg border px-2.5 py-2 text-left transition-colors"
-          :class="[
-            props.activeId === node.id || hoverId === node.id
-              ? 'border-teal-300 bg-primary-tint/50'
-              : 'border-border bg-white hover:border-slate-300 hover:bg-slate-50',
-          ]"
+          :class="nodeShellClass(node)"
+          :aria-current="props.activeId === node.id ? 'step' : undefined"
           @mouseenter="hoverId = node.id"
           @mouseleave="hoverId = null"
           @focus="hoverId = node.id"
@@ -146,10 +196,10 @@ function raciClass(m: string) {
           @click="emit('select', node)"
         >
           <div class="flex items-center justify-between gap-1">
-            <span class="truncate text-[11px] font-semibold text-foreground">{{ node.short }}</span>
-            <span class="os-badge shrink-0" :class="stateClass(node.state)">
+            <span class="truncate font-sans text-[10px] font-bold text-foreground">{{ node.short }}</span>
+            <span class="os-badge os-badge--micro shrink-0" :class="stateClass(node.state)">
               <span
-                class="inline-block h-1.5 w-1.5 rounded-full"
+                class="inline-block h-1.5 w-1.5 shrink-0 rounded-full"
                 :class="{
                   'bg-emerald-600': node.state === 'done',
                   'bg-teal-600': node.state === 'active',
@@ -157,38 +207,35 @@ function raciClass(m: string) {
                   'bg-slate-400': node.state === 'pending',
                 }"
               />
-              {{ stateLabel(node.state) }}
+              {{ badgeText(node) }}
             </span>
           </div>
           <div class="flex items-center gap-1.5">
             <span
               class="inline-flex h-4 w-4 items-center justify-center rounded border text-[9px] font-bold"
               :class="raciClass(node.raci)"
+              :title="node.raci === 'A' ? 'Accountable (Finance)' : 'Responsible (Ops)'"
             >
               {{ node.raci }}
             </span>
             <span class="truncate text-[10px] text-muted-foreground">{{ node.owner }}</span>
           </div>
 
-          <!-- Hover popover -->
           <div
             v-show="hoverId === node.id"
             class="pointer-events-none absolute left-0 top-[calc(100%+6px)] z-30 w-[220px] rounded-lg border border-border bg-white p-2.5 shadow-lg"
           >
-            <div class="text-[11px] font-semibold text-foreground">{{ node.label }}</div>
-            <div class="mt-1 text-[10px] text-muted-foreground">Owner · {{ node.owner }}</div>
-            <div class="mt-1 text-[10px] text-slate-500">
-              <template v-if="node.id === 'booking'">A · Mei Chen (Sales)</template>
-              <template v-else-if="node.id === 'flight'">A · Alex Rivera (Export Air Ops)</template>
-              <template v-else-if="node.id === 'customs'">A · Claire Nguyen (Finance)</template>
-              <template v-else-if="node.id === 'arrival'">A · Priya Nair (Import Air Ops)</template>
-              <template v-else>A · Hana Park (Terminal Ops)</template>
-            </div>
-            <div class="mt-1.5 flex items-center justify-between">
+            <div class="font-sans text-[10px] font-bold text-foreground">{{ node.label }}</div>
+            <div class="mt-1 text-[10px] text-muted-foreground">Desk · {{ node.owner }}</div>
+            <div class="mt-1 text-[10px] text-slate-500">{{ accountableLine(node) }}</div>
+            <div class="mt-1.5 flex items-center justify-between gap-2">
               <span class="text-[10px] font-medium text-slate-600">SLA</span>
               <span class="font-mono text-[10px] font-semibold text-teal-800">{{ node.sla }}</span>
             </div>
-            <div class="mt-1 text-[10px] text-slate-400">RACI {{ node.raci }} · click to open section</div>
+            <div class="mt-1 text-[10px] text-slate-400">
+              RACI {{ node.raci }} · click to jump
+              <span v-if="node.focusKey" class="font-mono"> · {{ node.focusKey }}</span>
+            </div>
           </div>
         </button>
         <ChevronRight

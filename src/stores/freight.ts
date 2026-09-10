@@ -269,6 +269,7 @@ const SHIPMENTS: ShipmentRecord[] = [
     notes: 'Golden demo PVG?SYD ? direct ? can Split HBL/MBL',
     consolidationId: null,
     auImport: {
+      ...emptyAuImportFields(),
       customerId: 'cust-srg',
       ownerAbn: '52123456789',
       ownerContact: '+61 2 9000 1234 ? import@sydneyretail.au',
@@ -353,6 +354,7 @@ const SHIPMENTS: ShipmentRecord[] = [
     notes: 'Import hold on clearance ? direct',
     consolidationId: null,
     auImport: {
+      ...emptyAuImportFields(),
       customerId: 'cust-pharma',
       ownerAbn: '',
       ownerContact: '+61 2 9555 4400 ? qa@sydneypharma.au',
@@ -462,6 +464,7 @@ const SHIPMENTS: ShipmentRecord[] = [
     notes: 'House A ? own HBL',
     consolidationId: 'con-ai-01',
     auImport: {
+      ...emptyAuImportFields(),
       customerId: 'cust-srg',
       ownerAbn: '52123456789',
       ownerContact: '+61 3 9000 0001',
@@ -670,6 +673,17 @@ export const useFreightStore = defineStore('freight', () => {
     con.airline = master.airline
     con.etd = master.etd
     con.eta = master.eta
+    const flight = master.extras?.flight || con.extras?.flight
+    const atd = master.extras?.atd || con.extras?.atd
+    const ata = master.extras?.ata || con.extras?.ata
+    if (flight || atd || ata) {
+      con.extras = {
+        ...(con.extras ?? {}),
+        ...(flight ? { flight } : {}),
+        ...(atd ? { atd } : {}),
+        ...(ata ? { ata } : {}),
+      }
+    }
     for (const hid of con.houseIds) {
       const h = shipments.value.find((s) => s.id === hid)
       if (!h) continue
@@ -678,9 +692,11 @@ export const useFreightStore = defineStore('freight', () => {
       h.airline = master.airline
       h.etd = master.etd
       h.eta = master.eta
-      const flight = master.extras?.flight
-      if (flight) {
-        h.extras = { ...(h.extras ?? {}), flight }
+      h.extras = {
+        ...(h.extras ?? {}),
+        ...(flight ? { flight } : {}),
+        ...(atd ? { atd } : {}),
+        ...(ata ? { ata } : {}),
       }
     }
   }
@@ -689,7 +705,16 @@ export const useFreightStore = defineStore('freight', () => {
     const row = consolidations.value.find((c) => c.id === id)
     if (!row) return null
     Object.assign(row, patch)
-    if (patch.mawb || patch.route || patch.airline || patch.etd || patch.eta) {
+    const scheduleTouched =
+      patch.mawb ||
+      patch.route ||
+      patch.airline ||
+      patch.etd ||
+      patch.eta ||
+      patch.extras?.flight != null ||
+      patch.extras?.atd != null ||
+      patch.extras?.ata != null
+    if (scheduleTouched) {
       const master = shipments.value.find((s) => s.id === row.masterJobId)
       if (master) {
         if (patch.mawb) master.mawb = patch.mawb
@@ -697,6 +722,17 @@ export const useFreightStore = defineStore('freight', () => {
         if (patch.airline) master.airline = patch.airline
         if (patch.etd) master.etd = patch.etd
         if (patch.eta) master.eta = patch.eta
+        if (patch.extras) {
+          master.extras = {
+            ...(master.extras ?? {}),
+            ...(patch.extras.flight != null ? { flight: patch.extras.flight } : {}),
+            ...(patch.extras.atd != null ? { atd: patch.extras.atd } : {}),
+            ...(patch.extras.ata != null ? { ata: patch.extras.ata } : {}),
+            ...(patch.extras.vessel != null ? { vessel: patch.extras.vessel } : {}),
+            ...(patch.extras.pol != null ? { pol: patch.extras.pol } : {}),
+            ...(patch.extras.pod != null ? { pod: patch.extras.pod } : {}),
+          }
+        }
       }
       syncConsoleFromMaster(id)
     }
@@ -1000,9 +1036,18 @@ export const useFreightStore = defineStore('freight', () => {
         etd: draft.etd || 'TBD',
         eta: draft.eta || 'TBD',
         chargeableWt: draft.weightKg ? `${draft.weightKg} kg` : '?',
-        notes: [draft.commodity, chargeNote, draft.quoteNo ? `From ${draft.quoteNo}` : `From ${bookingRef}`]
+        notes: [
+          draft.commodity,
+          draft.voyageFlight ? `Flt ${draft.voyageFlight}` : '',
+          draft.customsRequired === 'Y' ? 'Customs Y' : '',
+          draft.hsCode ? `HS ${draft.hsCode}` : '',
+          draft.specialReqs,
+          draft.notes,
+          chargeNote,
+          draft.quoteNo ? `From ${draft.quoteNo}` : `From ${bookingRef}`,
+        ]
           .filter(Boolean)
-          .join(' ? '),
+          .join(' · '),
         consolidationId: null,
         auImport: auImportFromClearanceDraft(draft),
         cargoLines: [],

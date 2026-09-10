@@ -1,11 +1,22 @@
 <script setup lang="ts">
+/**
+ * House Bill detail drawer under Console — CargoWise HAWB/HBL workspace.
+ * Schedule fields are inherited/locked from Master; customs + AR stay house-scoped.
+ */
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
-import { ChevronDown, ChevronRight, Link2, X } from '@lucide/vue'
+import { useRouter } from 'vue-router'
+import {
+  ChevronDown,
+  ChevronRight,
+  ExternalLink,
+  Link2,
+  X,
+} from '@lucide/vue'
 import CompactField from '@/components/ui/CompactField.vue'
 import CompactSelect from '@/components/ui/CompactSelect.vue'
 import CompactTextarea from '@/components/ui/CompactTextarea.vue'
 import { useFreightStore, type ShipmentRecord, type ShipmentStatus } from '@/stores/freight'
-import type { AuBiosecurityRisk, AuImportFields } from '@/types/auAirImport'
+import type { AuBiosecurityRisk, AuFreightTerm, AuImportFields } from '@/types/auAirImport'
 import { emptyAuImportFields } from '@/lib/auAirImportSmartFill'
 import { JOB_STATUS } from '@/data/legacySearchOptions'
 import { isBlockedJobStatus } from '@/lib/jobStatus'
@@ -22,14 +33,22 @@ const emit = defineEmits<{
 }>()
 
 const freight = useFreightStore()
+const router = useRouter()
 const draft = ref<ShipmentRecord | null>(null)
-const openAcc = ref({ commercial: true, customs: true, billing: true })
+const openAcc = ref({
+  identity: true,
+  parties: true,
+  cargo: true,
+  inherited: true,
+  customs: true,
+  billing: true,
+})
 const selectedCharges = ref<Set<string>>(new Set())
 let saveTimer: ReturnType<typeof setTimeout> | null = null
 
 const chargeRows = [
-  { id: 'ch-afc', code: 'AFC', side: 'Sell', amount: 'AUD 1,240.00', currency: 'AUD' },
-  { id: 'ch-thc', code: 'THC', side: 'Cost', amount: 'AUD 180.00', currency: 'AUD' },
+  { id: 'ch-afc', code: 'AFC', side: 'AR · Sell', amount: 'AUD 1,240.00', currency: 'AUD' },
+  { id: 'ch-thc', code: 'THC', side: 'AR · Sell', amount: 'AUD 180.00', currency: 'AUD' },
   { id: 'ch-gst', code: 'GST', side: 'Tax', amount: 'AUD 142.00', currency: 'AUD' },
 ]
 
@@ -52,11 +71,31 @@ const moneyLockOptions = [
   { value: 'locked', label: 'Money lock' },
 ]
 
-const masterMawb = computed(() => {
-  if (!draft.value?.consolidationId) return draft.value?.mawb || ''
-  const con = freight.consolidations.find((c) => c.id === draft.value!.consolidationId)
-  return con?.mawb || draft.value.mawb || ''
+const freightTermOptions = [
+  { value: '', label: 'Select…' },
+  { value: 'prepaid', label: 'Prepaid' },
+  { value: 'collect', label: 'Collect' },
+]
+
+const paymentOptions = [
+  { value: '', label: 'Select…' },
+  { value: 'PP', label: 'Prepaid (PP)' },
+  { value: 'CC', label: 'Collect (CC)' },
+]
+
+const consolidation = computed(() => {
+  if (!draft.value?.consolidationId) return null
+  return freight.consolidations.find((c) => c.id === draft.value!.consolidationId) ?? null
 })
+
+const masterMawb = computed(
+  () => consolidation.value?.mawb || draft.value?.mawb || '',
+)
+const inheritHint = computed(() =>
+  masterMawb.value
+    ? `Inherited from Master · MAWB ${masterMawb.value}`
+    : 'Inherited from Master Console',
+)
 
 const clearanceGate = computed(() => draft.value?.extras?.clearanceGate || 'open')
 const moneyLock = computed(() => draft.value?.extras?.moneyLock || 'unlocked')
@@ -71,7 +110,10 @@ const headerPill = computed(() => {
     return { label: draft.value.status.toUpperCase(), cls: 'os-badge--amber' }
   }
   if (clearanceGate.value === 'cleared' || draft.value.status === 'Verified') {
-    return { label: draft.value.status === 'Verified' ? 'VERIFIED' : 'CUSTOMS RELEASED', cls: 'os-badge--green' }
+    return {
+      label: draft.value.status === 'Verified' ? 'VERIFIED' : 'CUSTOMS RELEASED',
+      cls: 'os-badge--green',
+    }
   }
   return { label: draft.value.status.toUpperCase(), cls: 'os-badge--slate' }
 })
@@ -84,11 +126,20 @@ watch(
       draft.value = row
         ? {
             ...row,
-            auImport: row.auImport ? { ...row.auImport } : emptyAuImportFields(),
+            auImport: row.auImport
+              ? { ...emptyAuImportFields(), ...row.auImport }
+              : emptyAuImportFields(),
             extras: { ...(row.extras ?? {}) },
           }
         : null
-      openAcc.value = { commercial: true, customs: true, billing: true }
+      openAcc.value = {
+        identity: true,
+        parties: true,
+        cargo: true,
+        inherited: true,
+        customs: true,
+        billing: true,
+      }
       selectedCharges.value = new Set()
     }
   },
@@ -112,7 +163,7 @@ function scheduleAutosave() {
   saveTimer = setTimeout(() => {
     if (!draft.value) return
     freight.updateShipment(draft.value.id, { ...draft.value })
-    emit('autosaved', `Autosaved ${draft.value.jobNo}`)
+    emit('autosaved', `Autosaved House ${draft.value.hawb || draft.value.jobNo}`)
   }, 450)
 }
 
@@ -141,6 +192,24 @@ function patchExtra(key: string, value: string) {
   scheduleAutosave()
 }
 
+function openFullHouseJob() {
+  if (!draft.value) return
+  void router.push({
+    name: 'shipment',
+    params: { shipmentId: draft.value.id },
+    query: { from: 'console' },
+  })
+}
+
+function openHouseOverview() {
+  if (!draft.value) return
+  void router.push({
+    name: 'job-context',
+    params: { shipmentId: draft.value.id },
+    query: { from: 'console' },
+  })
+}
+
 function onKey(e: KeyboardEvent) {
   if (!props.open) return
   if (e.key === 'Escape') {
@@ -161,77 +230,220 @@ onUnmounted(() => {
     <div v-if="open && draft" class="os-drawer-backdrop" @click="emit('close')" />
     <aside
       v-if="open && draft"
-      class="os-drawer"
+      class="os-drawer os-drawer--house"
       role="dialog"
       aria-modal="true"
-      aria-label="House detail"
+      aria-label="House Bill detail"
     >
-      <header class="flex h-12 shrink-0 items-center gap-3 border-b border-border px-4">
-        <div class="min-w-0 flex-1">
-          <div class="font-mono text-[13px] font-bold">{{ draft.jobNo }}</div>
-          <div class="truncate text-[11px] text-muted-foreground">
-            {{ draft.customer }} · HAWB
-            <span class="font-mono">{{ draft.hawb || '—' }}</span>
-            <span v-if="draft.bookingRef" class="ml-1.5 font-mono text-teal-700">
-              · {{ draft.bookingRef }}
-            </span>
+      <header class="shrink-0 border-b border-border">
+        <div class="flex h-12 items-center gap-3 px-4">
+          <div class="min-w-0 flex-1">
+            <div class="flex flex-wrap items-center gap-2">
+              <span
+                class="rounded border border-violet-200 bg-violet-50 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wider text-violet-900"
+              >
+                House Bill
+              </span>
+              <span class="font-mono text-[15px] font-bold text-slate-900">
+                HAWB {{ draft.hawb || '— pending' }}
+              </span>
+            </div>
+            <div class="mt-0.5 truncate text-[11px] text-muted-foreground">
+              Job
+              <span class="font-mono">{{ draft.jobNo }}</span>
+              · {{ draft.customer }}
+              <span v-if="draft.bookingRef" class="ml-1 font-mono text-teal-700">
+                · {{ draft.bookingRef }}
+              </span>
+            </div>
           </div>
+          <span class="os-badge" :class="headerPill.cls">
+            <span class="inline-block h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+            {{ headerPill.label }}
+          </span>
+          <button
+            type="button"
+            class="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted"
+            aria-label="Close"
+            @click="emit('close')"
+          >
+            <X :size="16" :stroke-width="1.75" />
+          </button>
         </div>
-        <span class="os-badge" :class="headerPill.cls">
-          <span class="inline-block h-1.5 w-1.5 rounded-full bg-current opacity-70" />
-          {{ headerPill.label }}
-        </span>
-        <button
-          type="button"
-          class="flex h-8 w-8 items-center justify-center rounded-md hover:bg-muted"
-          aria-label="Close"
-          @click="emit('close')"
-        >
-          <X :size="16" :stroke-width="1.75" />
-        </button>
+        <div class="flex flex-wrap gap-1.5 border-t border-border bg-slate-50/80 px-4 py-2">
+          <button
+            type="button"
+            class="flex h-7 items-center gap-1 rounded-md border border-violet-200 bg-white px-2 text-[11px] font-semibold text-violet-900 hover:bg-violet-50"
+            @click="openFullHouseJob"
+          >
+            <ExternalLink :size="12" />
+            Open full House Job
+          </button>
+          <button
+            type="button"
+            class="flex h-7 items-center gap-1 rounded-md border border-border bg-white px-2 text-[11px] font-medium hover:bg-muted"
+            @click="openHouseOverview"
+          >
+            House Overview
+          </button>
+        </div>
       </header>
 
       <div class="min-h-0 flex-1 overflow-y-auto p-3">
-        <!-- Commercial -->
+        <!-- House identity / HAWB -->
         <div class="os-panel mb-2 overflow-hidden">
           <button
             type="button"
             class="flex w-full items-center justify-between px-3 py-2 text-left"
-            @click="openAcc.commercial = !openAcc.commercial"
+            @click="openAcc.identity = !openAcc.identity"
           >
-            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              ▾ Commercial details
+            <span class="text-[10px] font-bold uppercase tracking-wider text-violet-800">
+              House Bill identity
             </span>
-            <ChevronDown v-if="openAcc.commercial" :size="14" class="text-slate-400" />
+            <ChevronDown v-if="openAcc.identity" :size="14" class="text-slate-400" />
             <ChevronRight v-else :size="14" class="text-slate-400" />
           </button>
           <div
-            v-if="openAcc.commercial"
+            v-if="openAcc.identity"
             class="grid grid-cols-2 gap-2 border-t border-border px-3 pb-3 pt-2"
           >
             <CompactField
+              :model-value="draft.hawb"
+              label="HAWB / HBL"
+              mono
+              required
+              class="col-span-2"
+              @update:model-value="patch('hawb', String($event))"
+            />
+            <CompactField
               :model-value="draft.customer"
-              label="Customer"
+              label="Customer (bill-to)"
               required
               @update:model-value="patch('customer', String($event))"
             />
             <CompactSelect
               :model-value="draft.status"
-              label="Status"
+              label="House status"
               :options="statusOptions"
               @update:model-value="patch('status', $event as ShipmentStatus)"
             />
+            <CompactSelect
+              :model-value="draft.auImport?.incoTerm ?? ''"
+              label="Incoterm"
+              :options="[
+                { value: '', label: 'Select…' },
+                { value: 'EXW', label: 'EXW' },
+                { value: 'FOB', label: 'FOB' },
+                { value: 'CIF', label: 'CIF' },
+                { value: 'CFR', label: 'CFR' },
+                { value: 'DAP', label: 'DAP' },
+                { value: 'DDP', label: 'DDP' },
+              ]"
+              @update:model-value="patchAu('incoTerm', $event)"
+            />
+            <CompactSelect
+              :model-value="draft.auImport?.paymentTermHbl ?? ''"
+              label="HAWB freight terms"
+              :options="paymentOptions"
+              @update:model-value="patchAu('paymentTermHbl', $event)"
+            />
+            <CompactSelect
+              :model-value="draft.auImport?.freightTerm ?? ''"
+              label="Freight term"
+              :options="freightTermOptions"
+              @update:model-value="patchAu('freightTerm', $event as AuFreightTerm)"
+            />
+          </div>
+        </div>
+
+        <!-- Parties -->
+        <div class="os-panel mb-2 overflow-hidden">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between px-3 py-2 text-left"
+            @click="openAcc.parties = !openAcc.parties"
+          >
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              Shipper · Consignee · Notify
+            </span>
+            <ChevronDown v-if="openAcc.parties" :size="14" class="text-slate-400" />
+            <ChevronRight v-else :size="14" class="text-slate-400" />
+          </button>
+          <div
+            v-if="openAcc.parties"
+            class="grid grid-cols-2 gap-2 border-t border-border px-3 pb-3 pt-2"
+          >
             <CompactField
-              :model-value="draft.hawb"
-              label="HAWB / HBL"
-              mono
-              @update:model-value="patch('hawb', String($event))"
+              :model-value="draft.auImport?.shipperId || draft.extras?.shipper || ''"
+              label="Shipper"
+              class="col-span-2"
+              @update:model-value="
+                patchAu('shipperId', String($event));
+                patchExtra('shipper', String($event))
+              "
             />
             <CompactField
-              :model-value="masterMawb"
-              label="MAWB / MBL"
+              :model-value="draft.auImport?.consigneeId || draft.extras?.consignee || ''"
+              label="Consignee"
+              class="col-span-2"
+              @update:model-value="
+                patchAu('consigneeId', String($event));
+                patchExtra('consignee', String($event))
+              "
+            />
+            <CompactField
+              :model-value="draft.auImport?.notifyParty || draft.extras?.notifyParty || ''"
+              label="Notify party"
+              class="col-span-2"
+              @update:model-value="
+                patchAu('notifyParty', String($event));
+                patchExtra('notifyParty', String($event))
+              "
+            />
+            <CompactTextarea
+              :model-value="draft.auImport?.deliveryAddress ?? ''"
+              label="Delivery address"
+              class="col-span-2"
+              :rows="2"
+              @update:model-value="patchAu('deliveryAddress', $event)"
+            />
+          </div>
+        </div>
+
+        <!-- Cargo -->
+        <div class="os-panel mb-2 overflow-hidden">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between px-3 py-2 text-left"
+            @click="openAcc.cargo = !openAcc.cargo"
+          >
+            <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+              House cargo
+            </span>
+            <ChevronDown v-if="openAcc.cargo" :size="14" class="text-slate-400" />
+            <ChevronRight v-else :size="14" class="text-slate-400" />
+          </button>
+          <div
+            v-if="openAcc.cargo"
+            class="grid grid-cols-2 gap-2 border-t border-border px-3 pb-3 pt-2"
+          >
+            <CompactField
+              :model-value="draft.auImport?.pieces ?? ''"
+              label="Pieces"
+              type="number"
               mono
-              :inherit-hint="masterMawb ? `Inherited from MAWB ${masterMawb}` : 'Inherited from master'"
+              @update:model-value="
+                patchAu('pieces', $event === '' ? '' : Number($event))
+              "
+            />
+            <CompactField
+              :model-value="draft.auImport?.grossWeightKg ?? ''"
+              label="Gross wt (kg)"
+              type="number"
+              mono
+              @update:model-value="
+                patchAu('grossWeightKg', $event === '' ? '' : Number($event))
+              "
             />
             <CompactField
               :model-value="draft.chargeableWt"
@@ -240,26 +452,125 @@ onUnmounted(() => {
               @update:model-value="patch('chargeableWt', String($event))"
             />
             <CompactField
-              :model-value="draft.route"
-              label="Route"
+              :model-value="draft.extras?.volume || ''"
+              label="Volume (CBM)"
               mono
-              :inherit-hint="`Inherited from MAWB ${masterMawb || '—'}`"
+              @update:model-value="patchExtra('volume', String($event))"
             />
-            <p class="col-span-2 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-              <Link2 :size="12" />
-              MBL · route · airline · ETD/ETA sync-locked from master console
-            </p>
+            <CompactField
+              :model-value="draft.auImport?.packing ?? ''"
+              label="Packing"
+              @update:model-value="patchAu('packing', String($event))"
+            />
+            <CompactField
+              :model-value="draft.auImport?.cargoType ?? ''"
+              label="Cargo type"
+              @update:model-value="patchAu('cargoType', String($event))"
+            />
+            <CompactField
+              :model-value="draft.auImport?.commodityHs ?? ''"
+              label="HS code"
+              mono
+              @update:model-value="patchAu('commodityHs', String($event))"
+            />
+            <CompactField
+              :model-value="draft.auImport?.countryOfOrigin ?? ''"
+              label="Country of origin"
+              mono
+              @update:model-value="patchAu('countryOfOrigin', String($event))"
+            />
             <CompactTextarea
-              :model-value="draft.notes"
-              label="Notes"
+              :model-value="draft.auImport?.cargoDescription ?? draft.notes"
+              label="Cargo description"
               class="col-span-2"
               :rows="2"
-              @update:model-value="patch('notes', $event)"
+              @update:model-value="patchAu('cargoDescription', $event)"
+            />
+            <CompactTextarea
+              :model-value="draft.auImport?.marksAndNumbers ?? ''"
+              label="Marks & numbers"
+              class="col-span-2"
+              :rows="2"
+              @update:model-value="patchAu('marksAndNumbers', $event)"
+            />
+            <CompactTextarea
+              :model-value="draft.auImport?.specialReqs ?? ''"
+              label="Special requirements"
+              class="col-span-2"
+              :rows="2"
+              @update:model-value="patchAu('specialReqs', $event)"
             />
           </div>
         </div>
 
-        <!-- Customs / AU host facts -->
+        <!-- Inherited from Master (locked) -->
+        <div class="mb-2 overflow-hidden rounded-lg border border-sky-200 bg-sky-50/40">
+          <button
+            type="button"
+            class="flex w-full items-center justify-between px-3 py-2 text-left"
+            @click="openAcc.inherited = !openAcc.inherited"
+          >
+            <span class="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-sky-900">
+              <Link2 :size="12" />
+              Inherited from Master (locked)
+            </span>
+            <ChevronDown v-if="openAcc.inherited" :size="14" class="text-sky-700/50" />
+            <ChevronRight v-else :size="14" class="text-sky-700/50" />
+          </button>
+          <div
+            v-if="openAcc.inherited"
+            class="grid grid-cols-2 gap-2 border-t border-sky-200/60 px-3 pb-3 pt-2"
+          >
+            <CompactField
+              :model-value="masterMawb"
+              label="MAWB / MBL"
+              mono
+              :inherit-hint="inheritHint"
+            />
+            <CompactField
+              :model-value="consolidation?.airline || draft.airline"
+              label="Airline"
+              :inherit-hint="inheritHint"
+            />
+            <CompactField
+              :model-value="consolidation?.route || draft.route"
+              label="Route"
+              mono
+              class="col-span-2"
+              :inherit-hint="inheritHint"
+            />
+            <CompactField
+              :model-value="consolidation?.etd || draft.etd"
+              label="ETD"
+              mono
+              :inherit-hint="inheritHint"
+            />
+            <CompactField
+              :model-value="consolidation?.eta || draft.eta"
+              label="ETA"
+              mono
+              :inherit-hint="inheritHint"
+            />
+            <CompactField
+              :model-value="consolidation?.extras?.flight || draft.extras?.flight || ''"
+              label="Flight"
+              mono
+              :inherit-hint="inheritHint"
+            />
+            <CompactField
+              :model-value="consolidation?.extras?.atd || ''"
+              label="ATD"
+              mono
+              :inherit-hint="inheritHint"
+            />
+            <p class="col-span-2 flex items-center gap-1.5 text-[11px] text-sky-900/80">
+              <Link2 :size="12" />
+              Edit schedule on the Master Bill panel — houses never override while attached.
+            </p>
+          </div>
+        </div>
+
+        <!-- Customs -->
         <div class="mb-2 overflow-hidden rounded-lg border border-amber-200/80 bg-amber-50/30">
           <button
             type="button"
@@ -267,7 +578,7 @@ onUnmounted(() => {
             @click="openAcc.customs = !openAcc.customs"
           >
             <span class="text-[10px] font-bold uppercase tracking-wider text-amber-900">
-              ▾ Customs · ABN · DAFF · Clearance
+              Customs · ABN · DAFF · Clearance
             </span>
             <ChevronDown v-if="openAcc.customs" :size="14" class="text-amber-700/50" />
             <ChevronRight v-else :size="14" class="text-amber-700/50" />
@@ -288,6 +599,23 @@ onUnmounted(() => {
               label="Broker ref"
               mono
               @update:model-value="patchAu('brokerRef', String($event))"
+            />
+            <CompactField
+              :model-value="draft.auImport?.customsBroker ?? ''"
+              label="Customs broker"
+              @update:model-value="patchAu('customsBroker', String($event))"
+            />
+            <CompactSelect
+              :model-value="draft.auImport?.customsRequired ?? ''"
+              label="Customs required"
+              :options="[
+                { value: '', label: 'Select…' },
+                { value: 'Y', label: 'Yes' },
+                { value: 'N', label: 'No' },
+              ]"
+              @update:model-value="
+                patchAu('customsRequired', $event as AuImportFields['customsRequired'])
+              "
             />
             <CompactSelect
               :model-value="draft.auImport?.biosecurityRisk ?? 'none'"
@@ -314,12 +642,12 @@ onUnmounted(() => {
               @update:model-value="patchAu('declarationId', String($event) || null)"
             />
             <p class="col-span-2 text-[11px] text-amber-900/80">
-              Edits stay on this house Job — legacy jobState does not return the file to Book.
+              Customs filing is House scope only — never on the Console Master.
             </p>
           </div>
         </div>
 
-        <!-- Billing -->
+        <!-- House AR -->
         <div class="os-panel overflow-hidden">
           <button
             type="button"
@@ -327,12 +655,15 @@ onUnmounted(() => {
             @click="openAcc.billing = !openAcc.billing"
           >
             <span class="text-[10px] font-bold uppercase tracking-wider text-slate-500">
-              ▾ Billing ledger
+              House AR · customer charges
             </span>
             <ChevronDown v-if="openAcc.billing" :size="14" class="text-slate-400" />
             <ChevronRight v-else :size="14" class="text-slate-400" />
           </button>
           <div v-if="openAcc.billing" class="border-t border-border px-3 pb-3 pt-2 text-[12px]">
+            <p class="mb-2 text-[11px] text-muted-foreground">
+              Customer AR lives on the House — Console holds Carrier AP only.
+            </p>
             <table class="os-grid-table">
               <thead>
                 <tr>
@@ -375,7 +706,7 @@ onUnmounted(() => {
               <button
                 type="button"
                 class="h-8 rounded-md border border-border bg-white px-2 text-[10px] font-medium hover:bg-muted"
-                @click="emit('autosaved', `Copied ${selectedCharges.size} charge line(s)`)"
+                @click="emit('autosaved', `Copied ${selectedCharges.size} AR line(s)`)"
               >
                 Copy lines
               </button>
@@ -387,10 +718,19 @@ onUnmounted(() => {
                 Clear
               </button>
             </div>
-            <p class="mt-2 text-[11px] text-muted-foreground">
-              Full ledger on Job Desk → Charges. Weight
-              <span class="font-mono">{{ draft.chargeableWt || '—' }}</span>
-            </p>
+            <button
+              type="button"
+              class="mt-2 text-[11px] font-semibold text-teal-800 hover:underline"
+              @click="
+                router.push({
+                  name: 'shipment',
+                  params: { shipmentId: draft.id },
+                  query: { step: 'money_preview', from: 'console' },
+                })
+              "
+            >
+              Open House Charges &amp; Invoice →
+            </button>
           </div>
         </div>
       </div>
@@ -401,9 +741,11 @@ onUnmounted(() => {
           class="h-8 rounded-md border border-amber-200 bg-amber-50 px-3 text-[12px] font-medium text-amber-900"
           @click="emit('detach', draft.id)"
         >
-          Detach row
+          Detach house
         </button>
-        <span class="flex-1 text-[10px] text-muted-foreground">800px drawer · Esc closes · stay on console</span>
+        <span class="flex-1 text-[10px] text-muted-foreground">
+          House Bill drawer · Esc closes · stay on Console
+        </span>
         <button
           type="button"
           class="h-8 rounded-md border border-border px-3 text-[12px] font-medium hover:bg-muted"

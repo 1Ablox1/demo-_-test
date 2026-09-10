@@ -15,12 +15,7 @@ import {
 } from '@/components/ui/dialog'
 import type { MasterSelection, QuickCreateCustomerInput } from '@/mdm/types'
 import { toast as notify } from 'vue-sonner'
-import {
-  frequentAirportValues,
-  frequentCustomerValues,
-  masterAirports,
-  MODULE1_AI_LANE,
-} from '@/mocks/fixtures/masters'
+import { MODULE1_AI_LANE } from '@/mocks/fixtures/masters'
 import { useLifecycleStore } from '@/stores/lifecycle'
 import { useMastersStore } from '@/stores/masters'
 import { useTasksStore } from '@/stores/tasks'
@@ -69,27 +64,27 @@ const life = useLifecycleStore()
 const tasks = useTasksStore()
 const masters = useMastersStore()
 
+const airlineOptions = computed(() =>
+  masters.airlines.map((a) => ({
+    label: a.meta ? `${a.label} (${a.meta})` : a.label,
+    value: a.value,
+  })),
+)
+const currencyOptions = computed(() => {
+  const codes = masters.currencies.map((c) => c.value)
+  return codes.length ? codes : ['USD', 'AUD', 'EUR']
+})
+
 /** Module 1 home market = AU (Western Air Import trial). */
 const HOME = ['AU'] as const
 
 const INCOTERMS = ['EXW', 'FCA', 'FAS', 'FOB', 'CFR', 'CIF', 'CPT', 'CIP', 'DAP', 'DPU', 'DDP']
-const CURRENCIES = ['USD', 'AUD', 'GBP', 'EUR', 'HKD', 'JPY', 'SGD', 'CNY']
 const SVC_LEVELS = [
   { value: 'airport_airport', label: 'Airport  Airport' },
   { value: 'door_airport', label: 'Door  Airport' },
   { value: 'airport_door', label: 'Airport  Door' },
   { value: 'door_door', label: 'Door  Door' },
 ]
-const AIRLINES = [
-  { label: 'China Airlines (CI)', value: 'CI' },
-  { label: 'Cathay Pacific (CX)', value: 'CX' },
-  { label: 'United Airlines (UA)', value: 'UA' },
-  { label: 'American Airlines (AA)', value: 'AA' },
-  { label: 'Singapore Airlines (SQ)', value: 'SQ' },
-  { label: 'Qantas (QF)', value: 'QF' },
-  { label: 'Lufthansa (LH)', value: 'LH' },
-]
-
 const DIR_LABEL: Record<TradeDirection, string> = {
   air_export: 'Air Export',
   air_import: 'Air Import',
@@ -138,15 +133,17 @@ function makeLines(dir: TradeDirection): ChargeLine[] {
 
 function countryCodeFromAirport(a: MasterSelection): string | null {
   if (!a) return null
-  const full = masterAirports.find((x) => x.value === a.value)
-  const m = (full?.meta ?? '').toLowerCase()
-  if (!m) return null
-  if (m.includes('united states') || m === 'us') return 'US'
-  if (m.includes('china')) return 'CN'
-  if (m.includes('australia')) return 'AU'
-  if (m.includes('singapore')) return 'SG'
-  if (m.includes('germany')) return 'DE'
-  if (m.includes('united kingdom') || m === 'uk') return 'GB'
+  const full = masters.airports.find((x) => x.value === a.value)
+  const m = (full?.meta ?? '').trim().toUpperCase()
+  if (m.length === 2) return m
+  const label = (full?.meta ?? full?.label ?? '').toLowerCase()
+  if (!label) return null
+  if (label.includes('united states') || label === 'us') return 'US'
+  if (label.includes('china')) return 'CN'
+  if (label.includes('australia')) return 'AU'
+  if (label.includes('singapore')) return 'SG'
+  if (label.includes('germany')) return 'DE'
+  if (label.includes('united kingdom') || label === 'uk') return 'GB'
   return null
 }
 
@@ -297,7 +294,7 @@ const quoteComplete = computed(
 )
 
 function airportSelection(code: string): MasterSelection {
-  const full = masterAirports.find((x) => x.value === code)
+  const full = masters.airports.find((x) => x.value === code)
   if (!full) return null
   return { label: full.label, value: full.value, kind: 'airport' }
 }
@@ -358,7 +355,9 @@ watch(
   () => props.open,
   (v) => {
     if (v) {
-      resetForm()
+      void masters.ensureEchoCatalog().finally(() => {
+        resetForm()
+      })
       void masters.refreshCustomers()
       void life.load(QUOTE_STAGE_SHIPMENT_ID)
     }
@@ -623,7 +622,7 @@ function onNum(raw: string): number | null {
                     storage-key="customer"
                     allow-create
                     :options="masters.customers"
-                    :frequent-values="frequentCustomerValues"
+                    :frequent-values="masters.frequentCustomerValues"
                     :placeholder="t('mdm.searchCustomer')"
                     :create-label="t('mdm.createCustomer')"
                     :disabled="!canEdit"
@@ -642,9 +641,8 @@ function onNum(raw: string): number | null {
                   <SmartAutocomplete
                     v-model="shipper"
                     class="mt-1"
-                    storage-key="customer"
-                    :options="masters.customers"
-                    :frequent-values="frequentCustomerValues"
+                    storage-key="shipper"
+                    :options="masters.partyOptions('shipper', masters.shippers)"
                     placeholder="Search shipper"
                     :disabled="!canEdit"
                   />
@@ -655,9 +653,8 @@ function onNum(raw: string): number | null {
                   <SmartAutocomplete
                     v-model="consignee"
                     class="mt-1"
-                    storage-key="customer"
-                    :options="masters.customers"
-                    :frequent-values="frequentCustomerValues"
+                    storage-key="consignee"
+                    :options="masters.partyOptions('consignee', masters.consignees)"
                     placeholder="Search consignee"
                     :disabled="!canEdit"
                   />
@@ -668,8 +665,8 @@ function onNum(raw: string): number | null {
                   <SmartAutocomplete
                     v-model="notifyParty"
                     class="mt-1"
-                    storage-key="customer"
-                    :options="masters.customers"
+                    storage-key="notify"
+                    :options="masters.partyOptions('notify', masters.notifyParties)"
                     placeholder="Optional"
                     :disabled="!canEdit"
                   />
@@ -691,8 +688,8 @@ function onNum(raw: string): number | null {
                       v-model="originAirport"
                       class="mt-1"
                       storage-key="airport"
-                      :options="masterAirports"
-                      :frequent-values="frequentAirportValues"
+                      :options="masters.airports"
+                      :frequent-values="masters.frequentAirportValues"
                       :placeholder="t('mdm.searchAirport')"
                       :disabled="!canEdit"
                     />
@@ -703,8 +700,8 @@ function onNum(raw: string): number | null {
                       v-model="destAirport"
                       class="mt-1"
                       storage-key="airport"
-                      :options="masterAirports"
-                      :frequent-values="frequentAirportValues"
+                      :options="masters.airports"
+                      :frequent-values="masters.frequentAirportValues"
                       :placeholder="t('mdm.searchAirport')"
                       :disabled="!canEdit"
                     />
@@ -719,7 +716,7 @@ function onNum(raw: string): number | null {
                     :disabled="!canEdit"
                   >
                     <option value="">Any airline</option>
-                    <option v-for="a in AIRLINES" :key="a.value" :value="a.value">
+                    <option v-for="a in airlineOptions" :key="a.value" :value="a.value">
                       {{ a.label }}
                     </option>
                   </select>
@@ -916,7 +913,7 @@ function onNum(raw: string): number | null {
                   class="mt-1 h-9 w-full rounded-[7px] border border-[#E4E7EC] bg-white px-2.5 text-[13px] outline-none focus:border-primary"
                   :disabled="!canEdit"
                 >
-                  <option v-for="i in INCOTERMS" :key="i" :value="i">{{ i }}</option>
+                  <option v-for="i in (masters.incoterms.length ? masters.incoterms.map(x => x.value) : INCOTERMS)" :key="i" :value="i">{{ i }}</option>
                 </select>
               </label>
               <label class="block text-[11px] font-medium text-[#6B7280]">
@@ -926,7 +923,7 @@ function onNum(raw: string): number | null {
                   class="mt-1 h-9 w-full rounded-[7px] border border-[#E4E7EC] bg-white px-2.5 text-[13px] outline-none focus:border-primary"
                   :disabled="!canEdit"
                 >
-                  <option v-for="c in CURRENCIES" :key="c" :value="c">{{ c }}</option>
+                  <option v-for="c in currencyOptions" :key="c" :value="c">{{ c }}</option>
                 </select>
               </label>
               <label class="block text-[11px] font-medium text-[#6B7280]">

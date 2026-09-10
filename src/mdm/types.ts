@@ -1,12 +1,24 @@
 /** Operational MDM pick — user sees label; value is business key for adapter/legacy. */
 export type MasterKind =
   | 'customer'
+  | 'shipper'
+  | 'consignee'
+  | 'notify'
+  | 'agent'
   | 'country'
   | 'airport'
   | 'port'
   | 'airline'
   | 'currency'
   | 'charge'
+  | 'user'
+  | 'office'
+  | 'department'
+  | 'incoterm'
+  | 'freight_term'
+  | 'payment_term'
+  | 'packing'
+  | 'cargo_type'
 
 export type MasterApprovalStatus = 'active' | 'pending_approval' | 'rejected'
 

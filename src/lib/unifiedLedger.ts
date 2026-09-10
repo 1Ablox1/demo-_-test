@@ -30,6 +30,7 @@ export interface UnifiedLedgerRow {
   varianceFlagged: boolean
   fullyPosted: boolean
   open: boolean
+  cafApplied: boolean
 }
 
 function cleanLabel(description: string) {
@@ -103,6 +104,7 @@ export function buildUnifiedLedger(
     )
     const oversea = Boolean(ar?.oversea ?? ap?.oversea)
     const labelSource = ar?.description ?? ap?.description ?? code
+    const cafApplied = Boolean(ap?.cafApplied)
 
     return {
       code,
@@ -123,6 +125,7 @@ export function buildUnifiedLedger(
       varianceFlagged,
       fullyPosted,
       open,
+      cafApplied,
     }
   })
 }
@@ -137,13 +140,51 @@ export function filterLedgerRows(rows: UnifiedLedgerRow[], filter: LedgerFilter)
   return rows
 }
 
-export function ledgerFilterCounts(rows: UnifiedLedgerRow[]) {
+export type LedgerUiStatus = 'Draft' | 'Accrued' | 'Approved' | 'Posted' | 'Variance'
+
+export function ledgerRowStatus(row: UnifiedLedgerRow): LedgerUiStatus {
+  if (row.varianceFlagged) return 'Variance'
+  if (row.fullyPosted) return 'Posted'
+  const states = [row.apState, row.arState]
+  if (states.some((s) => s === 'approved' || s === 'invoiced_ar')) return 'Approved'
+  if (states.some((s) => s === 'accrued' || s === 'actual_ap' || s === 'rated')) return 'Accrued'
+  return 'Draft'
+}
+
+export function formatLedgerMoney(n: number | null | undefined, currency = 'AUD') {
+  if (n == null) return '—'
+  const sign = n < 0 ? '-' : ''
+  return `${sign}${currency} ${Math.abs(n).toLocaleString('en-US', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  })}`
+}
+
+export function ledgerStatusClass(s: LedgerUiStatus) {
+  const map: Record<LedgerUiStatus, string> = {
+    Draft: 'border-[#E4E7EC] bg-[#F3F4F6] text-[#6B7280]',
+    Accrued: 'border-[#BFDBFE] bg-[#EFF6FF] text-[#2563EB]',
+    Approved: 'border-[#A7F3D0] bg-[#D1FAE5] text-[#059669]',
+    Posted: 'border-[#1F2937] bg-[#1F2937] text-white',
+    Variance: 'border-[#FDE68A] bg-[#FEF3C7] text-[#B45309]',
+  }
+  return map[s]
+}
+
+export function ledgerChipCounts(rows: UnifiedLedgerRow[]) {
   return {
     all: rows.length,
-    open: rows.filter((r) => r.open).length,
-    variance: rows.filter((r) => r.varianceFlagged || (r.costVariance ?? 0) !== 0).length,
-    posted: rows.filter((r) => r.fullyPosted).length,
+    open: rows.filter((r) => {
+      const s = ledgerRowStatus(r)
+      return s === 'Draft' || s === 'Accrued'
+    }).length,
+    variance: rows.filter((r) => ledgerRowStatus(r) === 'Variance').length,
+    posted: rows.filter((r) => ledgerRowStatus(r) === 'Posted').length,
     domestic: rows.filter((r) => !r.oversea).length,
     overseas: rows.filter((r) => r.oversea).length,
   }
+}
+
+export function ledgerFilterCounts(rows: UnifiedLedgerRow[]) {
+  return ledgerChipCounts(rows)
 }

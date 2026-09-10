@@ -40,6 +40,24 @@ export interface AuImportFields {
   deliveryAddress: string
   /** Prepaid / collect — legacy freightTerm */
   freightTerm: AuFreightTerm
+  /** HAWB / MAWB freight payment terms (PP/CC) — Echo Priority A */
+  paymentTermHbl: string
+  paymentTermMbl: string
+  /** SC sales / NC nominated */
+  cargoSource: 'SC' | 'NC' | ''
+  /** Customs broker party name (Priority A) */
+  customsBroker: string
+  /** Echo customs Y/N */
+  customsRequired: '' | 'Y' | 'N'
+  packing: string
+  cargoType: string
+  /** Aircraft / vessel */
+  vessel: string
+  /** Ops / sales user labels */
+  op: string
+  sales: string
+  /** Special requirements (satisfiedRequests) */
+  specialReqs: string
   /** Licensed broker reference — Module 1 clearance checklist */
   brokerRef: string
   biosecurityRisk: AuBiosecurityRisk
@@ -91,12 +109,13 @@ export interface InheritFlash {
 }
 
 export const AU_IMPORT_STEPS: { id: AuImportStepId; label: string; hint: string }[] = [
+  // Order + labels align with Lifecycle Handoff spine
   { id: 'commercial', label: 'Booking', hint: 'Importer, ABN, Incoterm' },
   { id: 'route', label: 'Flight', hint: 'Ports, airline, ETD/ETA' },
-  { id: 'awb_cargo', label: 'AWB & cargo', hint: 'MAWB/HAWB, weight, goods' },
-  { id: 'parties_delivery', label: 'Delivery', hint: 'Shipper, consignee, deliver-to' },
   { id: 'customs_handoff', label: 'Customs', hint: 'Broker, freight terms, DAFF' },
-  { id: 'money_preview', label: 'Duty / GST', hint: 'Valuation estimates (not N10)' },
+  { id: 'awb_cargo', label: 'Arrival', hint: 'MAWB/HAWB, weight, goods' },
+  { id: 'money_preview', label: 'Charges', hint: 'Unified Ledger · Accrue / Approve · invoice handoff' },
+  { id: 'parties_delivery', label: 'Delivery', hint: 'Shipper, consignee, deliver-to' },
 ]
 
 export const INCO_TERMS = ['EXW', 'FOB', 'CIF', 'CFR', 'DAP', 'DDP'] as const

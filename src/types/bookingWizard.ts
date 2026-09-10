@@ -79,22 +79,70 @@ export interface BookingDraft {
   quoteNo: string | null
   lobPrefix: SpineLobPrefix
   structure: BookingFileStructure
-  /** Shipment */
+  /**
+   * Shipment — labels for display; *Id / *Code hold MDM keys (cmpIdx, IATA, userId).
+   * Echo Form Display fields from 02_air-import-job-fields (parties / ports / terms / staff).
+   */
   customer: string
+  customerId: string
   shipper: string
+  shipperId: string
   consignee: string
+  consigneeId: string
+  notifyParty: string
+  notifyPartyId: string
+  bookingAgent: string
+  bookingAgentId: string
+  nominatedAgent: string
+  nominatedAgentId: string
   origin: string
+  originCode: string
   destination: string
+  destinationCode: string
   airline: string
+  airlineId: string
   etd: string
   eta: string
   pieces: string
   weightKg: string
   volumeCbm: string
+  chargeWeight: string
   commodity: string
+  packing: string
+  packingCode: string
+  cargoType: string
+  cargoTypeCode: string
   hawb: string
   mawb: string
+  cargoSource: 'SC' | 'NC' | ''
+  incoTerm: string
+  freightTerm: string
+  paymentTermHbl: string
+  /** Echo paymentTermMBL — Priority A */
+  paymentTermMbl: string
+  opOffice: string
+  opOfficeId: string
+  opDepartment: string
+  opDepartmentId: string
+  /** Echo `op` — ops user (Priority A) */
+  op: string
+  opId: string
+  sales: string
+  salesId: string
+  /** Flight / vessel (Priority A) */
+  voyageFlight: string
+  vessel: string
+  /** Customs broker party (Priority A) */
+  customsBroker: string
+  customsBrokerId: string
+  /** Echo `customs` Y/N — needs customs clearance */
+  customsRequired: '' | 'Y' | 'N'
+  /** HS code — mirrored to clearance.commodityHs for AI */
+  hsCode: string
+  /** Echo remarks */
   notes: string
+  /** Echo satisfiedRequests — special requirements */
+  specialReqs: string
   /** Billing */
   charges: BookingChargeLine[]
   /** Consolidation (master facts + planned houses) */
@@ -141,7 +189,7 @@ export function wizardStepsFor(
     {
       id: 'shipment',
       label: 'Shipment',
-      hint: 'Parties, route, cargo, AWB refs',
+      hint: 'Parties, route, flight, terms, ops',
     },
   ]
   if (lobPrefix === 'AI') {
@@ -184,20 +232,57 @@ export function emptyBookingDraft(
     lobPrefix: 'AI',
     structure: 'direct',
     customer: '',
+    customerId: '',
     shipper: '',
+    shipperId: '',
     consignee: '',
+    consigneeId: '',
+    notifyParty: '',
+    notifyPartyId: '',
+    bookingAgent: '',
+    bookingAgentId: '',
+    nominatedAgent: '',
+    nominatedAgentId: '',
     origin: '',
+    originCode: '',
     destination: '',
+    destinationCode: '',
     airline: '',
+    airlineId: '',
     etd: '',
     eta: '',
     pieces: '',
     weightKg: '',
     volumeCbm: '',
+    chargeWeight: '',
     commodity: '',
+    packing: '',
+    packingCode: '',
+    cargoType: '',
+    cargoTypeCode: '',
     hawb: '',
     mawb: '',
+    cargoSource: 'SC',
+    incoTerm: '',
+    freightTerm: '',
+    paymentTermHbl: '',
+    paymentTermMbl: '',
+    opOffice: '',
+    opOfficeId: '',
+    opDepartment: '',
+    opDepartmentId: '',
+    op: '',
+    opId: '',
+    sales: '',
+    salesId: '',
+    voyageFlight: '',
+    vessel: '',
+    customsBroker: '',
+    customsBrokerId: '',
+    customsRequired: '',
+    hsCode: '',
     notes: '',
+    specialReqs: '',
     charges: [],
     masterMawb: '',
     houseCount: 1,

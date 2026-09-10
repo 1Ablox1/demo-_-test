@@ -24,7 +24,7 @@ import {
   SheetTitle,
 } from '@/components/ui/sheet'
 import type { MasterSelection, QuickCreateCustomerInput } from '@/mdm/types'
-import { frequentCountryValues, masterCountries } from '@/mocks/fixtures/masters'
+import { useMastersStore } from '@/stores/masters'
 
 const props = defineProps<{
   open: boolean
@@ -38,6 +38,7 @@ const emit = defineEmits<{
 }>()
 
 const { t } = useI18n()
+const masters = useMastersStore()
 
 /** Maps to legacy partner type flags (customer / shipper / agent )  not full Info tabs */
 const ROLE_OPTIONS = [
@@ -185,8 +186,8 @@ function submit() {
             <SmartAutocomplete
               v-model="country"
               storage-key="country"
-              :options="masterCountries"
-              :frequent-values="frequentCountryValues"
+              :options="masters.countries"
+              :frequent-values="masters.frequentCountryValues"
               :placeholder="t('mdm.searchCountry')"
             />
           </div>

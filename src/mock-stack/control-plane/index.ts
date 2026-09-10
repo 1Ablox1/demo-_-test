@@ -284,14 +284,18 @@ export const controlPlane = {
         ctaLabel: 'Review weight',
       })
     }
-    if (workers.marginGuard && charges && charges.gp.provisionalGp < 12) {
-      chips.push({
-        id: 'dw-margin-guard',
-        workerId: 'dw-margin-guard',
-        title: 'Margin guard',
-        detail: `Provisional GP ${charges.gp.provisionalGp}% is below 12% gate — Finance review suggested.`,
-        tone: 'warn',
-      })
+    if (workers.marginGuard && charges) {
+      const sell = charges.gp.sellTotal
+      const marginPct = sell > 0 ? (charges.gp.provisionalGp / sell) * 100 : null
+      if (marginPct != null && marginPct < 12) {
+        chips.push({
+          id: 'dw-margin-guard',
+          workerId: 'dw-margin-guard',
+          title: 'Margin guard',
+          detail: `Provisional margin ${marginPct.toFixed(1)}% is below 12% gate — Finance review suggested.`,
+          tone: 'warn',
+        })
+      }
     }
     if (workers.chargeDraft && role === 'operations' && life.currentMilestoneId === 'charges') {
       chips.push({
@@ -300,8 +304,8 @@ export const controlPlane = {
         title: 'Charge draft',
         detail: '3 AP lines still Draft — accrue before ETD cutoff.',
         tone: 'info',
-        ctaLabel: 'Open Charges',
-        href: `/jobs/${shipmentId}/charges`,
+        ctaLabel: 'Open Charges & Invoice',
+        href: `/shipments/${shipmentId}?step=money_preview`,
       })
     }
     if (workers.gateWatch && openGate) {

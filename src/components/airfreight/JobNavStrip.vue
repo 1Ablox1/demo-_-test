@@ -6,7 +6,7 @@ import { Lock } from '@lucide/vue'
 import { displayJobNo } from '@/lib/jobIdentity'
 import { cn } from '@/lib/utils'
 
-export type JobNavPage = 'overview' | 'timeline' | 'charges' | 'invoice' | 'quote'
+export type JobNavPage = 'overview' | 'timeline' | 'quote'
 export type JobNavGlow = 'timeline' | null
 
 const props = withDefaults(
@@ -22,16 +22,12 @@ const props = withDefaults(
     osPulse?: boolean
     /** Soft glow on a tab (e.g. Next Action hover → Timeline) */
     glowTab?: JobNavGlow
-    chargesLocked?: boolean
-    invoiceLocked?: boolean
   }>(),
   {
     compact: false,
     osSuggest: true,
     osPulse: false,
     glowTab: null,
-    chargesLocked: false,
-    invoiceLocked: false,
   },
 )
 
@@ -60,20 +56,6 @@ const items = computed(() => [
     hint: t('nav.pages.timelineHint'),
     locked: false,
     go: () => router.push({ name: 'job-spine', params: { shipmentId: id.value } }),
-  },
-  {
-    id: 'charges' as const,
-    label: t('nav.pages.charges'),
-    hint: t('nav.pages.chargesHint'),
-    locked: props.chargesLocked,
-    go: () => router.push({ name: 'job-charges', params: { shipmentId: id.value } }),
-  },
-  {
-    id: 'invoice' as const,
-    label: t('nav.pages.invoice'),
-    hint: t('nav.pages.invoiceHint'),
-    locked: props.invoiceLocked,
-    go: () => router.push({ name: 'job-invoice', params: { shipmentId: id.value } }),
   },
 ])
 
@@ -112,7 +94,7 @@ function onTabClick(item: (typeof items.value)[number]) {
       <span class="hidden text-[11px] text-muted-foreground sm:inline">· {{ t('nav.youAreHere') }}</span>
     </div>
 
-    <div class="grid grid-cols-2 sm:grid-cols-4">
+    <div class="grid grid-cols-2">
       <button
         v-for="item in items"
         :key="item.id"

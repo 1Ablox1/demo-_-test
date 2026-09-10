@@ -37,8 +37,11 @@ export function seedDraftFromEntry(input: {
       base.quoteNo = q.quoteNo
       base.customer = q.customer
       base.origin = q.origin
+      base.originCode = q.origin
       base.destination = q.destination
+      base.destinationCode = q.destination
       base.airline = q.airline
+      base.airlineId = q.airline
       base.pieces = q.pieces
       base.weightKg = q.weightKg
       base.volumeCbm = q.volumeCbm

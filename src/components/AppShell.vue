@@ -200,6 +200,17 @@ function onSettingsClick() {
   auth.openPrefs()
 }
 
+function goEchoLogin() {
+  avatarOpen.value = false
+  void router.push({ name: 'echo-login' })
+}
+
+async function signOut() {
+  avatarOpen.value = false
+  await auth.logout()
+  void router.push({ name: 'echo-login' })
+}
+
 function pickSeat(s: Seat) {
   auth.setSeat(s)
   seatOpen.value = false
@@ -228,7 +239,7 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
       <a
         href="/dashboard"
         class="os-brand-lockup flex shrink-0 items-center gap-2.5 px-4 pb-3 pt-4"
-        aria-label="WALTECH CargoWare OS — Dashboard"
+        aria-label="WALLTECH CargoWare OS — Dashboard"
         @click.prevent="router.push({ name: 'dashboard' })"
       >
         <img
@@ -241,9 +252,9 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
         />
         <span class="os-brand-lockup__wordmark flex flex-col justify-center leading-none">
           <span class="os-brand-lockup__waltech text-[9px] font-bold tracking-[0.14em]">
-            <span class="os-brand-lockup__wal">WAL</span><span class="os-brand-lockup__tech">TECH</span>
+            <span class="os-brand-lockup__wal">WALL</span><span class="os-brand-lockup__tech">TECH</span>
           </span>
-          <span class="os-brand-lockup__product mt-0.5 text-[13px] font-bold tracking-tight text-white">
+          <span class="os-brand-lockup__product mt-0.5 text-[13px] font-bold tracking-tight">
             CargoWare OS
           </span>
         </span>
@@ -427,7 +438,18 @@ onUnmounted(() => window.removeEventListener('keydown', onKey))
                 Admin Studio
               </button>
               <div class="my-1 h-px bg-border" />
-              <button type="button" class="os-shell-dropdown__item text-destructive" @click="avatarOpen = false">
+              <button
+                v-if="auth.isAuthenticated"
+                type="button"
+                class="os-shell-dropdown__item text-[10px] text-muted-foreground"
+                disabled
+              >
+                Echo · {{ auth.session?.userName || auth.sessionId }}
+              </button>
+              <button type="button" class="os-shell-dropdown__item" @click="goEchoLogin">
+                Echo connect…
+              </button>
+              <button type="button" class="os-shell-dropdown__item text-destructive" @click="signOut">
                 Sign out
               </button>
             </div>

@@ -108,10 +108,10 @@ export const useChargesStore = defineStore('charges', () => {
     )
   })
 
-  /** Ops only: accrued / base — locked after Approve or when job blocked */
+  /** Ops: edit provisional / accrued amounts until Finance Approve */
   const canEditAccrued = computed(() => {
-    if (role.value !== 'operations') return false
-    if (!payload.value || payload.value.blocked || accrualsLocked.value) return false
+    if (role.value !== 'operations' && role.value !== 'admin') return false
+    if (!payload.value || accrualsLocked.value) return false
     return true
   })
 
@@ -122,10 +122,14 @@ export const useChargesStore = defineStore('charges', () => {
     return true
   })
 
+  /** CAF estimate on WIP — Ops + Finance before Approve (formal Accrue still gated separately) */
   const canEditCaf = computed(() => {
-    if (!(role.value === 'finance' || role.value === 'admin')) return false
-    if (!payload.value || payload.value.blocked) return false
-    return true
+    if (!payload.value || accrualsLocked.value) return false
+    return (
+      role.value === 'operations' ||
+      role.value === 'finance' ||
+      role.value === 'admin'
+    )
   })
 
   const canEditVarianceNote = computed(() => {
@@ -141,11 +145,43 @@ export const useChargesStore = defineStore('charges', () => {
     () => role.value === 'admin' && !!payload.value && !payload.value.blocked,
   )
 
-  /** Ops adds stub lines only before Finance Approve */
+  /**
+   * Early continuous charge entry (stages 1–5): provisional / estimated lines
+   * even while clearance holds formal Accrue. Locked after Finance Approve.
+   */
   const canAddLine = computed(() => {
-    if (role.value !== 'operations') return false
-    if (!payload.value || payload.value.blocked || accrualsLocked.value) return false
+    if (role.value !== 'operations' && role.value !== 'admin') return false
+    if (!payload.value || accrualsLocked.value) return false
     return true
+  })
+
+  const canAddProvisional = computed(() => canAddLine.value)
+
+  /** Job-centric handoff — Financial Module remains SoR for issue / pay / GL */
+  const readyForBilling = ref(false)
+  const invoiceRequestStatus = ref<'none' | 'requested'>('none')
+
+  const canMarkReadyForBilling = computed(() => {
+    if (!payload.value) return false
+    if (role.value !== 'operations' && role.value !== 'admin') return false
+    return (
+      !payload.value.blocked &&
+      (payload.value.moneyState === 'provisioned' ||
+        payload.value.moneyState === 'charges_approved' ||
+        payload.value.lines.some((l) => l.state === 'accrued' || l.state === 'approved'))
+    )
+  })
+
+  const canRequestFinalInvoice = computed(() => {
+    if (!payload.value) return false
+    if (
+      role.value !== 'operations' &&
+      role.value !== 'finance' &&
+      role.value !== 'admin'
+    ) {
+      return false
+    }
+    return readyForBilling.value || payload.value.moneyState === 'charges_approved'
   })
 
   const canPostAny = computed(
@@ -188,20 +224,28 @@ export const useChargesStore = defineStore('charges', () => {
     data.homeCurrency = data.pack === 'US' ? 'USD' : 'AUD'
   }
 
+  let loadSeq = 0
+
   async function load(shipmentId: number) {
+    const seq = ++loadSeq
     loading.value = true
     error.value = null
     lastCafLineCodes.value = []
+    // Job-scoped UI flags must not leak across shipment switches
+    readyForBilling.value = false
+    invoiceRequestStatus.value = 'none'
     payload.value = null
     try {
       const data = await fetchCharges(shipmentId)
+      if (seq !== loadSeq) return
       applyPackHome(data)
       applyCafToLines(data)
       payload.value = data
     } catch (err) {
+      if (seq !== loadSeq) return
       error.value = err instanceof Error ? err.message : 'Failed to load charges'
     } finally {
-      loading.value = false
+      if (seq === loadSeq) loading.value = false
     }
   }
 
@@ -343,27 +387,89 @@ export const useChargesStore = defineStore('charges', () => {
     sonnerToast.message('Posted to GL (mock)')
   }
 
-  function addChargeLine() {
+  function addChargeLine(opts?: {
+    side?: 'AR' | 'AP'
+    code?: string
+    description?: string
+    amount?: number
+    provisional?: boolean
+  }) {
     if (!payload.value || !canAddLine.value) return
     const id = `c-stub-${Date.now()}`
     const home = payload.value.homeCurrency
+    const side = opts?.side ?? 'AR'
+    const amount = opts?.amount ?? 0
+    const provisional = opts?.provisional !== false
+    const code = opts?.code ?? (side === 'AP' ? 'AP-EST' : 'MISC')
+    const description =
+      opts?.description ??
+      (provisional
+        ? side === 'AP'
+          ? 'Provisional AP (estimate)'
+          : 'Provisional AR (estimate)'
+        : 'Manual charge (stub)')
     payload.value.lines.push({
       id,
-      code: 'MISC',
-      description: 'Manual charge (stub)',
-      side: 'AR',
-      amount: 0,
+      code,
+      description,
+      side,
+      amount,
+      baseAmount: side === 'AP' ? amount : undefined,
       currency: home,
-      amountAud: 0,
+      amountAud: amount,
       rateSource: 'manual',
-      state: 'draft',
+      state: provisional ? 'draft' : 'rated',
       partyName: 'Manual',
-      ratingBasis: 'Manual',
+      ratingBasis: provisional ? 'Provisional / estimated' : 'Manual',
       oversea: false,
       audit: [],
     })
     payload.value.gp = recomputeGp(payload.value)
-    sonnerToast.message('Stub AR line added — edit amount in Ledger (Ops) or switch role')
+    const holdNote = payload.value.blocked
+      ? ' — formal Accrue locked until clearance / docs gate clears'
+      : ''
+    sonnerToast.message(
+      `${side} line added as ${provisional ? 'Provisional' : 'Rated'}${holdNote}`,
+    )
+  }
+
+  function addCommonSurcharge(code: 'CAF' | 'FSC' | 'THC' = 'CAF') {
+    if (!payload.value || !canAddLine.value) return
+    const labels: Record<string, string> = {
+      CAF: 'Currency adjustment factor (surcharge line)',
+      FSC: 'Fuel surcharge',
+      THC: 'Terminal handling',
+    }
+    addChargeLine({
+      side: 'AR',
+      code,
+      description: labels[code] ?? code,
+      amount: 0,
+      provisional: true,
+    })
+    if (code === 'CAF' && canEditCaf.value) {
+      setCafPercent(payload.value.cafPercent || 3.5)
+    }
+  }
+
+  function markReadyForBilling() {
+    if (!payload.value || !canMarkReadyForBilling.value) {
+      sonnerToast.message('Ready for Billing needs accrued lines and a clear money gate')
+      return
+    }
+    readyForBilling.value = true
+    sonnerToast.message('Job marked Ready for Billing — Finance Module notified (handoff)')
+  }
+
+  function requestFinalInvoice() {
+    if (!payload.value || !canRequestFinalInvoice.value) {
+      sonnerToast.message('Mark Ready for Billing (or get Finance approve) before requesting invoice')
+      return
+    }
+    invoiceRequestStatus.value = 'requested'
+    sonnerToast.message(
+      'Final invoice requested — forwarded to Financial Module (no issue/post here)',
+    )
   }
 
   async function accrue() {
@@ -409,7 +515,9 @@ export const useChargesStore = defineStore('charges', () => {
   function clear() {
     payload.value = null
     error.value = null
-        lastCafLineCodes.value = []
+    lastCafLineCodes.value = []
+    readyForBilling.value = false
+    invoiceRequestStatus.value = 'none'
   }
 
   function notify(message: string) {
@@ -432,6 +540,11 @@ export const useChargesStore = defineStore('charges', () => {
     canEditFx,
     canEditThreshold,
     canAddLine,
+    canAddProvisional,
+    canMarkReadyForBilling,
+    canRequestFinalInvoice,
+    readyForBilling,
+    invoiceRequestStatus,
     canPostAny,
     canPostLine,
     jobReadyToPost,
@@ -451,6 +564,9 @@ export const useChargesStore = defineStore('charges', () => {
     clearVariance,
     postLine,
     addChargeLine,
+    addCommonSurcharge,
+    markReadyForBilling,
+    requestFinalInvoice,
     clear,
     notify,
   }

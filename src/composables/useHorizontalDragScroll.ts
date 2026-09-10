@@ -1,17 +1,21 @@
 import { onBeforeUnmount, ref, type Ref } from 'vue'
 
 /**
- * Left-click drag horizontally to pan AG Grid (and similar) scroll viewports.
- * Skips header cells so column reorder still works.
+ * Left-click drag horizontally to pan AG Grid scroll viewports.
+ * Pointer capture starts only after a real drag threshold so double-click
+ * on rows still reaches AG Grid / native dblclick.
  */
 export function useHorizontalDragScroll(rootRef: Ref<HTMLElement | null>) {
   const didDrag = ref(false)
 
   let attached: HTMLElement | null = null
+  let pending = false
   let dragging = false
   let startX = 0
+  let startY = 0
   let startScroll = 0
-  let moved = false
+  let pointerId: number | null = null
+  const DRAG_THRESHOLD_PX = 10
 
   function getViewport(root: HTMLElement): HTMLElement | null {
     return (
@@ -27,37 +31,56 @@ export function useHorizontalDragScroll(rootRef: Ref<HTMLElement | null>) {
     if (!root) return
     const target = e.target as HTMLElement | null
     if (!target) return
-    // Keep column header drag-reorder / sort intact
-    if (target.closest('.ag-header-cell, .ag-header, .ag-floating-top, input, button, a, select, textarea')) {
+    // Keep column header drag-reorder / sort / controls intact
+    if (
+      target.closest(
+        '.ag-header-cell, .ag-header, .ag-floating-top, input, button, a, select, textarea, [data-row-action]',
+      )
+    ) {
       return
     }
     const viewport = getViewport(root)
     if (!viewport) return
 
-    dragging = true
-    moved = false
+    // Arm only — do NOT capture yet (capture breaks double-click)
+    pending = true
+    dragging = false
     didDrag.value = false
+    pointerId = e.pointerId
     startX = e.clientX
+    startY = e.clientY
     startScroll = viewport.scrollLeft
-    root.classList.add('is-h-dragging')
-    try {
-      root.setPointerCapture(e.pointerId)
-    } catch {
-      /* ignore */
-    }
   }
 
   function onPointerMove(e: PointerEvent) {
-    if (!dragging || !attached) return
+    if (!pending && !dragging) return
+    if (pointerId != null && e.pointerId !== pointerId) return
+    if (!attached) return
     const viewport = getViewport(attached)
     if (!viewport) return
+
     const dx = e.clientX - startX
-    if (Math.abs(dx) > 3) {
-      moved = true
+    const dy = e.clientY - startY
+
+    if (!dragging) {
+      // Prefer vertical intent / tiny jitter → leave for click / dblclick
+      if (Math.abs(dx) < DRAG_THRESHOLD_PX) return
+      if (Math.abs(dx) < Math.abs(dy)) {
+        pending = false
+        return
+      }
+      dragging = true
+      pending = false
       didDrag.value = true
+      attached.classList.add('is-h-dragging')
+      try {
+        attached.setPointerCapture(e.pointerId)
+      } catch {
+        /* ignore */
+      }
     }
+
     viewport.scrollLeft = startScroll - dx
-    // Keep linked horizontal scrollbars in sync when present
     const hScroll = attached.querySelector(
       '.ag-body-horizontal-scroll-viewport',
     ) as HTMLElement | null
@@ -65,20 +88,24 @@ export function useHorizontalDragScroll(rootRef: Ref<HTMLElement | null>) {
   }
 
   function onPointerUp(e: PointerEvent) {
-    if (!dragging) return
+    if (pointerId != null && e.pointerId !== pointerId) return
+    const wasDragging = dragging
+    pending = false
     dragging = false
+    pointerId = null
     attached?.classList.remove('is-h-dragging')
     try {
       attached?.releasePointerCapture(e.pointerId)
     } catch {
       /* ignore */
     }
-    // Keep didDrag through the following click so row-open is skipped
-    if (moved) {
+    if (wasDragging) {
       didDrag.value = true
       window.setTimeout(() => {
         didDrag.value = false
-      }, 80)
+      }, 120)
+    } else {
+      didDrag.value = false
     }
   }
 
@@ -101,7 +128,9 @@ export function useHorizontalDragScroll(rootRef: Ref<HTMLElement | null>) {
     attached.removeEventListener('pointercancel', onPointerUp)
     attached.classList.remove('h-drag-scroll', 'is-h-dragging')
     attached = null
+    pending = false
     dragging = false
+    pointerId = null
   }
 
   function bindFromRoot() {

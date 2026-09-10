@@ -9,7 +9,12 @@ import { useThemeStore } from '@/stores/theme'
 import { shouldStartMsw } from '@/api/client'
 import { usesEchoReads } from '@/api/config'
 import { useAuthStore } from '@/stores/auth'
+import { ModuleRegistry, AllCommunityModule, provideGlobalGridOptions } from 'ag-grid-community'
 import './style.css'
+
+// AG Grid v33+: CSS file themes require theme: 'legacy' (error #239)
+ModuleRegistry.registerModules([AllCommunityModule])
+provideGlobalGridOptions({ theme: 'legacy' })
 
 async function prepareMocks() {
   if (!shouldStartMsw()) return

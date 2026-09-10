@@ -132,8 +132,8 @@ export function mapEchoJobToContext(job: OsAirImportJob, shipmentId: number): Jo
     jobId: job.identity.jobId,
     jobNo: job.identity.jobNo,
     lob: (job.identity.lob || 'AI') as 'AI',
-    mbl: job.identity.mbl ?? null,
-    hbl: job.identity.hbl ?? null,
+    mbl: job.identity.mbl ?? job.identity.mawbNo ?? null,
+    hbl: job.identity.hbl ?? job.identity.hawbNo ?? null,
   }
 
   const route = laneFromRoute(job.route?.loadingPortCode, job.route?.dischargingPortCode)
@@ -336,12 +336,17 @@ export function mapEchoGateToDetail(gate: OsGateState, gateId = AU_CLEARANCE_GAT
 }
 
 export function mergeHybridDesk(echo: MyTasksPayload, msw: MyTasksPayload): MyTasksPayload {
-  const echoShipmentIds = new Set(echo.tasks.map((t) => t.shipmentId))
+  // Prefer Echo desk rows for wired Module-1 jobs when Echo returns any;
+  // fall back to MSW Module-1 fixtures if Echo desk is empty / down for that job.
+  const echoWired = echo.tasks.filter((t) => isEchoWiredShipment(t.shipmentId))
+  const echoOther = echo.tasks.filter((t) => !isEchoWiredShipment(t.shipmentId))
   const mswModule1 = msw.tasks.filter((t) => isEchoWiredShipment(t.shipmentId))
+  const echoShipmentIds = new Set(echo.tasks.map((t) => t.shipmentId))
   const mswOther = msw.tasks.filter(
     (t) => !isEchoWiredShipment(t.shipmentId) && !echoShipmentIds.has(t.shipmentId),
   )
-  const tasks = [...echo.tasks.filter((t) => !isEchoWiredShipment(t.shipmentId)), ...mswModule1, ...mswOther]
+  const module1 = echoWired.length > 0 ? echoWired : mswModule1
+  const tasks = [...module1, ...echoOther, ...mswOther]
   const workboard = [...msw.workboard]
   for (const wb of echo.workboard) {
     if (!workboard.some((w) => w.shipmentId === wb.shipmentId)) workboard.push(wb)

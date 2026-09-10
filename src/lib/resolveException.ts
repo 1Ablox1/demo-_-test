@@ -158,12 +158,15 @@ export function routeForExceptionResolve(
   if (!id) return null
   const air = airQuery(job, shipments, id)
 
-  // Module 1 western job workspace — prefer /jobs/:id over shell shipment form
+  // Money ops live on Job operate spine — Overview stays brief
   switch (op) {
     case 'invoice':
-      return { name: 'job-invoice', params: { shipmentId: id }, query: air }
     case 'charges':
-      return { name: 'job-charges', params: { shipmentId: id }, query: air }
+      return {
+        name: 'shipment',
+        params: { shipmentId: id },
+        query: { ...air, step: 'money_preview' },
+      }
     case 'documents':
     case 'customs':
     case 'flight':

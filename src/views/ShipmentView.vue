@@ -9,6 +9,7 @@ import JobGateBar from '@/components/job/JobGateBar.vue'
 import JobHandoffSpine, {
   type HandoffNode,
   type HandoffNodeId,
+  type HandoffNodeState,
 } from '@/components/job/JobHandoffSpine.vue'
 import CompactField from '@/components/ui/CompactField.vue'
 import CompactSelect from '@/components/ui/CompactSelect.vue'
@@ -35,10 +36,19 @@ import {
 } from '@/stores/freight'
 import { JOB_STATUS } from '@/data/legacySearchOptions'
 import { isBlockedJobStatus } from '@/lib/jobStatus'
+import {
+  AU_SPINE_ACCOUNTABLE,
+  AU_SPINE_FOCUS_FIELD,
+  detectAuCustomsHold,
+  evaluateCreditGate,
+  isFinalInvoiceLockedForPod,
+} from '@/lib/auLifecycle'
+import { useChargesStore } from '@/stores/charges'
 
 const freight = useFreightStore()
 const auth = useAuthStore()
 const handoff = useJobHandoffStore()
+const charges = useChargesStore()
 const route = useRoute()
 const router = useRouter()
 
@@ -156,27 +166,20 @@ const guidedFocus = computed(() => {
 })
 
 const formVisibleSteps = computed((): AuImportStepId[] | null => {
-  if (!isAuImport.value || !gateState.value) return null
-  const s = gateState.value
-  if (auth.seat === 'admin') return [...OPS_GATE_STEPS, ...FINANCE_GATE_STEPS]
-  if (s.phase === 'ops') {
-    if (auth.seat === 'operations' || auth.seat === 'sales') return [...OPS_GATE_STEPS]
-    return []
-  }
-  if (s.phase === 'finance') {
-    if (auth.seat === 'finance') return [...FINANCE_GATE_STEPS]
-    // Ops sees completed ops work read-only; not Finance money fields
-    return [...OPS_GATE_STEPS]
-  }
+  // Operate desk (shell parity): all AU steps visible including Charges & Invoice
+  if (!isAuImport.value) return null
   return [...OPS_GATE_STEPS, ...FINANCE_GATE_STEPS]
 })
+
+/** Shell Lifecycle Handoff: spine is free to jump — not seat-locked. */
+const formGuided = computed(() => false)
 
 const formReadOnly = computed(() => {
   const ship = liveShipment.value
   if (!ship || !isAuImport.value) return false
   if (auth.seat === 'admin') return false
   const step = guidedFocus.value
-  if (!step) return true
+  if (!step) return false
   return !handoff.canEditStep(ship.id, auth.seat, step)
 })
 
@@ -204,7 +207,7 @@ const STEP_TO_HANDOFF: Record<AuImportStepId, HandoffNodeId> = {
   awb_cargo: 'arrival',
   parties_delivery: 'delivery',
   customs_handoff: 'customs',
-  money_preview: 'customs',
+  money_preview: 'billing',
 }
 
 const HANDOFF_TO_STEP: Partial<Record<HandoffNodeId, AuImportStepId>> = {
@@ -213,6 +216,7 @@ const HANDOFF_TO_STEP: Partial<Record<HandoffNodeId, AuImportStepId>> = {
   customs: 'customs_handoff',
   arrival: 'awb_cargo',
   delivery: 'parties_delivery',
+  billing: 'money_preview',
 }
 
 function syncSpineToFormProgress(opts?: { scroll?: boolean }) {
@@ -221,7 +225,8 @@ function syncSpineToFormProgress(opts?: { scroll?: boolean }) {
   const completion = stepCompletion(auFields.value, liveShipment.value)
   const next = guided ?? nextIncompleteStep(completion)
   activeNode.value = STEP_TO_HANDOFF[next]
-  if (next === 'customs_handoff' || next === 'money_preview') inspector.value = 'customs'
+  if (next === 'customs_handoff') inspector.value = 'customs'
+  if (next === 'money_preview') inspector.value = 'money'
   nextTick(() => {
     auFormRef.value?.goStep(next, undefined, { scroll: opts?.scroll ?? false })
   })
@@ -251,11 +256,10 @@ const customsSummary = computed(() => {
 
 const handoffNodes = computed((): HandoffNode[] => {
   const ship = liveShipment.value
-  const held =
-    !!ship &&
-    (isBlockedJobStatus(ship.status) ||
-      ship.extras?.clearanceGate === 'held' ||
-      ship.auImport?.biosecurityRisk === 'daff_review')
+  const hold = detectAuCustomsHold(ship, auFields.value)
+  const held = hold.held
+  const credit = evaluateCreditGate(auFields.value, ship)
+  const podLocked = isFinalInvoiceLockedForPod(ship, auFields.value)
   const completion =
     ship && isAuImport.value ? stepCompletion(auFields.value, ship) : null
   const gate = gateState.value
@@ -271,6 +275,12 @@ const handoffNodes = computed((): HandoffNode[] => {
     return 'pending'
   }
 
+  const deliveryState: HandoffNode['state'] = held
+    ? 'pending'
+    : credit.blocked
+      ? 'held'
+      : stateFor('parties_delivery', 'pending')
+
   return [
     {
       id: 'booking',
@@ -281,6 +291,8 @@ const handoffNodes = computed((): HandoffNode[] => {
       raci: 'R',
       sla: completion?.commercial ? 'SLA met' : 'Complete commercial facts',
       section: 'commercial',
+      focusKey: AU_SPINE_FOCUS_FIELD.booking,
+      accountable: AU_SPINE_ACCOUNTABLE.booking,
     },
     {
       id: 'flight',
@@ -291,6 +303,8 @@ const handoffNodes = computed((): HandoffNode[] => {
       raci: 'R',
       sla: ship?.etd ? `ETD ${ship.etd}` : 'Not set',
       section: 'route',
+      focusKey: AU_SPINE_FOCUS_FIELD.flight,
+      accountable: AU_SPINE_ACCOUNTABLE.flight,
     },
     {
       id: 'customs',
@@ -308,33 +322,72 @@ const handoffNodes = computed((): HandoffNode[] => {
         gate?.phase === 'finance'
           ? 'Handed to Finance'
           : held
-            ? '4h 12m remaining'
+            ? hold.detail
             : completion?.customs_handoff
-              ? 'Clearance ready'
-              : 'Broker 路 DAFF 路 freight term',
+              ? 'N10 / clearance ready'
+              : 'Broker · ABF N10 · DAFF',
       section: 'customs_handoff',
+      stateBadge: held ? hold.badge : undefined,
+      focusKey: AU_SPINE_FOCUS_FIELD.customs,
+      accountable: AU_SPINE_ACCOUNTABLE.customs,
     },
     {
       id: 'arrival',
       label: 'Cargo Arrival',
       short: '4. Cargo Arrival',
-      state: stateFor('awb_cargo', 'pending'),
+      state: held ? 'pending' : stateFor('awb_cargo', 'pending'),
       owner: operatorLabel('arrivalDesk'),
       raci: 'R',
       sla: ship?.eta ? `ETA ${ship.eta}` : 'Awaiting',
       section: 'awb_cargo',
+      focusKey: AU_SPINE_FOCUS_FIELD.arrival,
+      accountable: AU_SPINE_ACCOUNTABLE.arrival,
+    },
+    {
+      id: 'billing',
+      label: 'Charges & Invoice',
+      short: '5. Charges & Invoice',
+      state: stateFor('money_preview', 'pending'),
+      owner: operatorLabel('invoiceDesk'),
+      raci: 'A',
+      sla: podLocked
+        ? 'Draft AR · POD unlocks final invoice · ATO GST'
+        : completion?.money_preview
+          ? 'Money ready · issue tax invoice'
+          : 'Unified Ledger · Accrue AP/AR · ATO GST',
+      section: 'money_preview',
+      focusKey: AU_SPINE_FOCUS_FIELD.billing,
+      accountable: AU_SPINE_ACCOUNTABLE.billing,
     },
     {
       id: 'delivery',
       label: 'Final Delivery',
-      short: '5. Final Delivery',
-      state: stateFor('parties_delivery', 'pending'),
+      short: '6. Final Delivery',
+      state: deliveryState,
       owner: operatorLabel('deliveryDesk'),
       raci: 'R',
-      sla: 'Not started',
+      sla: held
+        ? 'D/O blocked — customs hold'
+        : credit.blocked
+          ? credit.message
+          : podLocked
+            ? 'D/O · await POD for final invoice'
+            : 'POD received · invoice unlocked',
       section: 'parties_delivery',
+      stateBadge: credit.blocked && !held ? 'HELD: COD' : undefined,
+      focusKey: AU_SPINE_FOCUS_FIELD.delivery,
+      accountable: AU_SPINE_ACCOUNTABLE.delivery,
     },
   ]
+})
+
+/** Field-stage chips mirror Lifecycle Handoff node states. */
+const formStepStates = computed((): Partial<Record<AuImportStepId, HandoffNodeState>> => {
+  const map: Partial<Record<AuImportStepId, HandoffNodeState>> = {}
+  for (const node of handoffNodes.value) {
+    if (node.section) map[node.section as AuImportStepId] = node.state
+  }
+  return map
 })
 
 function loadId(id: string | null) {
@@ -359,7 +412,16 @@ function loadId(id: string | null) {
   formTab.value = 'fields'
   if (row.lob === 'air_import') {
     handoff.ensure(row.id, row.jobNo)
-    nextTick(() => nextTick(() => syncSpineToFormProgress()))
+    const sid = Number(row.id)
+    if (Number.isFinite(sid) && sid > 0) void charges.load(sid)
+    const stepQ = String(route.query.step ?? '')
+    const spineQ = String(route.query.spine ?? '')
+    const hasMoneyDeepLink =
+      AU_STEPS.includes(stepQ as AuImportStepId) || spineQ === 'billing'
+    // Deep-link (e.g. Overview → Charges spine) wins over progress sync
+    if (!hasMoneyDeepLink) {
+      nextTick(() => nextTick(() => syncSpineToFormProgress()))
+    }
   }
   applyResolveDeepLink(row)
 }
@@ -367,28 +429,37 @@ function loadId(id: string | null) {
 const AU_STEPS: AuImportStepId[] = [
   'commercial',
   'route',
-  'awb_cargo',
-  'parties_delivery',
   'customs_handoff',
+  'awb_cargo',
   'money_preview',
+  'parties_delivery',
 ]
 
-/** Exception Resolve deep-links: ?step=customs_handoff · ?tab=awb */
+/** Exception Resolve / Overview deep-links: ?step=money_preview · ?spine=billing · ?tab=awb */
 function applyResolveDeepLink(row: ShipmentRecord) {
   const stepRaw = String(route.query.step ?? '')
   const tabRaw = String(route.query.tab ?? '')
+  const spineRaw = String(route.query.spine ?? '')
 
   if (tabRaw === 'awb' || tabRaw === 'basic' || tabRaw === 'parties' || tabRaw === 'notes' || tabRaw === 'structure') {
     aeTab.value = tabRaw
   }
 
-  if (row.lob === 'air_import' && AU_STEPS.includes(stepRaw as AuImportStepId)) {
-    const step = stepRaw as AuImportStepId
-    if (step === 'customs_handoff' || step === 'money_preview') inspector.value = 'customs'
+  let step: AuImportStepId | null = null
+  if (AU_STEPS.includes(stepRaw as AuImportStepId)) {
+    step = stepRaw as AuImportStepId
+  } else if (spineRaw === 'billing') {
+    step = 'money_preview'
+  }
+
+  if (row.lob === 'air_import' && step) {
+    if (step === 'customs_handoff') inspector.value = 'customs'
+    if (step === 'money_preview') inspector.value = 'money'
     if (step === 'parties_delivery') inspector.value = 'docs'
+    activeNode.value = STEP_TO_HANDOFF[step]
     nextTick(() => {
       nextTick(() => {
-        auFormRef.value?.goStep(step, undefined, { scroll: true })
+        auFormRef.value?.goStep(step!, undefined, { scroll: true })
       })
     })
     return
@@ -419,13 +490,26 @@ function startNewDraft() {
 
 function openRow(id: string) {
   const lob = workspaceAir.value
-  // Module 1: Jobs list → western job workspace (context / spine / charges / invoice)
+  // Module 1: Jobs list → Overview (job desk)
   void router.push({
     name: 'job-context',
     params: { shipmentId: id },
     query: {
       ...(lob ? { lob } : {}),
       ...(route.query.from ? { from: String(route.query.from) } : {}),
+    },
+  })
+}
+
+/** Edit Job — OS shell shipment form parity (`/shipments/:id`). */
+function editRow(id: string) {
+  const lob = workspaceAir.value
+  // Path form is more reliable than named params when already on /shipments
+  void router.push({
+    path: `/shipments/${encodeURIComponent(id)}`,
+    query: {
+      ...(lob ? { lob } : {}),
+      from: 'jobs',
     },
   })
 }
@@ -551,33 +635,33 @@ async function submit() {
 }
 
 const SPINE_FIELD_HINT: Partial<Record<HandoffNodeId, string>> = {
-  booking: 'customerId',
-  customs: 'brokerRef',
-  delivery: 'deliveryAddress',
-  arrival: 'hawb',
-  flight: 'etd',
+  booking: AU_SPINE_FOCUS_FIELD.booking,
+  customs: AU_SPINE_FOCUS_FIELD.customs,
+  delivery: AU_SPINE_FOCUS_FIELD.delivery,
+  arrival: AU_SPINE_FOCUS_FIELD.arrival,
+  flight: AU_SPINE_FOCUS_FIELD.flight,
+  billing: AU_SPINE_FOCUS_FIELD.billing,
 }
 
 function onSpineSelect(node: HandoffNode) {
   activeNode.value = node.id
   const step = (node.section as AuImportStepId | undefined) ?? HANDOFF_TO_STEP[node.id]
+  // Never remap billing via focusKey (sellCurrency used to jump to Booking)
+  const focusKey =
+    node.id === 'billing' ? undefined : (node.focusKey ?? SPINE_FIELD_HINT[node.id])
 
   if (isAuImport.value) {
     if (!step) return
-    // Seat-gated: spine can only open the active R gate (admin bypass)
-    if (auth.seat !== 'admin' && guidedFocus.value && step !== guidedFocus.value) {
-      toastRef.value?.show('Open your current gate with Next 鈥?spine is locked to your seat', 'warn')
-      return
-    }
-    const run = () => auFormRef.value?.goStep(step, SPINE_FIELD_HINT[node.id], { scroll: true })
+    // Charges & Invoice stay on this Job operate page (spine step 5) — no desk redirect
+    const run = () => auFormRef.value?.goStep(step, focusKey, { scroll: true })
     if (auFormRef.value) run()
     else nextTick(run)
     if (node.id === 'customs') inspector.value = 'customs'
     if (node.id === 'delivery') inspector.value = 'docs'
+    if (node.id === 'billing') inspector.value = 'money'
     return
   }
 
-  // Non-AI: scroll split / generic operate block
   nextTick(() => {
     if (node.id === 'booking') {
       splitRef.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -690,6 +774,7 @@ watch(
         :lob-key="workspaceAir ?? 'ALL'"
         :title="workspaceTitle"
         @open="openRow"
+        @edit="editRow"
         @create="goCreate"
         @toast="(msg, kind) => toastRef?.show(msg, kind)"
       />
@@ -756,11 +841,11 @@ watch(
           <span class="text-slate-400">Cmd/Ctrl+S · Save Draft</span>
         </div>
 
-        <div class="flex gap-1 border-b border-border bg-slate-50 px-4 py-1.5">
+        <div class="flex gap-1 border-b border-border bg-white px-4 py-1.5">
           <button
             type="button"
             class="rounded-md px-3 py-1.5 text-[11px] font-semibold"
-            :class="formTab === 'fields' ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-500 hover:bg-white/70'"
+            :class="formTab === 'fields' ? 'bg-slate-100 text-teal-900 ring-1 ring-slate-200' : 'text-slate-500 hover:bg-slate-50'"
             @click="formTab = 'fields'"
           >
             Fields
@@ -768,7 +853,7 @@ watch(
           <button
             type="button"
             class="rounded-md px-3 py-1.5 text-[11px] font-semibold"
-            :class="formTab === 'structure' ? 'bg-white text-teal-800 shadow-sm' : 'text-slate-500 hover:bg-white/70'"
+            :class="formTab === 'structure' ? 'bg-slate-100 text-teal-900 ring-1 ring-slate-200' : 'text-slate-500 hover:bg-slate-50'"
             @click="formTab = 'structure'"
           >
             Structure
@@ -806,10 +891,11 @@ watch(
                 :shipment="liveShipment"
                 :au-fields="auFields"
                 :consolidation="linkedConsolidation"
-                :guided="Boolean(draft.id && guidedFocus)"
+                :guided="formGuided"
                 :focus-step="draft.id ? guidedFocus : null"
                 :visible-steps="draft.id ? formVisibleSteps : null"
                 :read-only="draft.id ? formReadOnly : false"
+                :step-states="formStepStates"
                 @update:shipment="onShipmentPatch"
                 @update:au-fields="onAuFieldsPatch"
               />
@@ -1005,7 +1091,53 @@ watch(
                 </dl>
               </template>
               <template v-else-if="inspector === 'money'">
-                <dl class="space-y-2 font-mono text-[11px]">
+                <div class="os-micro-label">Provisional GP</div>
+                <div class="mb-2 font-mono text-[13px] font-semibold text-teal-900">
+                  {{
+                    charges.payload &&
+                    liveShipment &&
+                    charges.payload.shipmentId === Number(liveShipment.id)
+                      ? `${charges.payload.gp.provisionalGp.toLocaleString(undefined, { maximumFractionDigits: 2 })} ${charges.payload.homeCurrency}`
+                      : '—'
+                  }}
+                </div>
+                <dl class="mb-3 space-y-2 font-mono text-[11px]">
+                  <div class="flex justify-between">
+                    <dt class="text-muted-foreground">Buy</dt>
+                    <dd>
+                      {{
+                        charges.payload &&
+                        liveShipment &&
+                        charges.payload.shipmentId === Number(liveShipment.id)
+                          ? charges.payload.gp.accruedCostTotal.toLocaleString()
+                          : '—'
+                      }}
+                    </dd>
+                  </div>
+                  <div class="flex justify-between">
+                    <dt class="text-muted-foreground">Sell</dt>
+                    <dd>
+                      {{
+                        charges.payload &&
+                        liveShipment &&
+                        charges.payload.shipmentId === Number(liveShipment.id)
+                          ? charges.payload.gp.sellTotal.toLocaleString()
+                          : '—'
+                      }}
+                    </dd>
+                  </div>
+                  <div class="flex justify-between">
+                    <dt class="text-muted-foreground">Money state</dt>
+                    <dd>
+                      {{
+                        charges.payload &&
+                        liveShipment &&
+                        charges.payload.shipmentId === Number(liveShipment.id)
+                          ? (charges.payload.moneyState ?? '—')
+                          : '—'
+                      }}
+                    </dd>
+                  </div>
                   <div class="flex justify-between">
                     <dt class="text-muted-foreground">Duty est.</dt>
                     <dd>{{ auFields.dutyAmountEst || '—' }}</dd>
@@ -1015,6 +1147,9 @@ watch(
                     <dd>{{ auFields.gstAmountEst || '—' }}</dd>
                   </div>
                 </dl>
+                <p class="text-[10px] text-muted-foreground">
+                  Edit the full ledger on spine step 5 · Charges &amp; Invoice (this page).
+                </p>
               </template>
               <template v-else>
                 <ul class="space-y-1.5 text-[11px] text-muted-foreground">

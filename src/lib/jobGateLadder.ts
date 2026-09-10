@@ -2,16 +2,17 @@ import type { AuImportStepId } from '@/types/auAirImport'
 import type { Seat } from '@/stores/auth'
 import type { HandoffNodeId } from '@/components/job/JobHandoffSpine.vue'
 
-/** Ops (R) ladder — Next advances within this seat only. */
+/** Ops (R) ladder — order mirrors Lifecycle Handoff spine. */
 export const OPS_GATE_STEPS: AuImportStepId[] = [
   'commercial',
   'route',
-  'awb_cargo',
-  'parties_delivery',
   'customs_handoff',
+  'awb_cargo',
+  'money_preview',
+  'parties_delivery',
 ]
 
-/** Finance (R/A) ladder after Ops handoff. */
+/** Finance (R/A) ladder after Ops handoff — stamp / issue on Charges desk. */
 export const FINANCE_GATE_STEPS: AuImportStepId[] = ['money_preview']
 
 export type JobWorkPhase = 'ops' | 'finance' | 'done'
@@ -37,26 +38,10 @@ export const GATE_META: Record<AuImportStepId, GateMeta> = {
   route: {
     stepId: 'route',
     handoffId: 'flight',
-    title: 'Flight & ports',
+    title: 'Flight departure',
     seat: 'operations',
     raci: 'R',
     blurb: 'Port of loading / discharge, airline, ETD / ETA.',
-  },
-  awb_cargo: {
-    stepId: 'awb_cargo',
-    handoffId: 'arrival',
-    title: 'AWB & cargo',
-    seat: 'operations',
-    raci: 'R',
-    blurb: 'MAWB, HAWB, pieces, weight, goods description.',
-  },
-  parties_delivery: {
-    stepId: 'parties_delivery',
-    handoffId: 'delivery',
-    title: 'Parties & delivery',
-    seat: 'operations',
-    raci: 'R',
-    blurb: 'Shipper, consignee, delivery address.',
   },
   customs_handoff: {
     stepId: 'customs_handoff',
@@ -66,13 +51,29 @@ export const GATE_META: Record<AuImportStepId, GateMeta> = {
     raci: 'R',
     blurb: 'Broker ref, freight terms, DAFF — then hand off.',
   },
+  awb_cargo: {
+    stepId: 'awb_cargo',
+    handoffId: 'arrival',
+    title: 'Cargo arrival',
+    seat: 'operations',
+    raci: 'R',
+    blurb: 'MAWB, HAWB, pieces, weight, goods description.',
+  },
   money_preview: {
     stepId: 'money_preview',
-    handoffId: 'customs',
-    title: 'Duty / GST & stamp',
-    seat: 'finance',
-    raci: 'A',
-    blurb: 'Review valuation estimates and release money gates.',
+    handoffId: 'billing',
+    title: 'Charges & invoice',
+    seat: 'operations',
+    raci: 'R',
+    blurb: 'Unified Ledger — Accrue / Approve; Finance stamps after handoff.',
+  },
+  parties_delivery: {
+    stepId: 'parties_delivery',
+    handoffId: 'delivery',
+    title: 'Final delivery',
+    seat: 'operations',
+    raci: 'R',
+    blurb: 'Shipper, consignee, delivery address.',
   },
 }
 

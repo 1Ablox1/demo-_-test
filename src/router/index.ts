@@ -14,16 +14,23 @@ import BillingPayablesView from '@/views/finance/BillingPayablesView.vue'
 import JobWorkspaceLayout from '@/views/airfreight/JobWorkspaceLayout.vue'
 import JobContextView from '@/views/airfreight/JobContextView.vue'
 import JobSpineView from '@/views/airfreight/JobSpineView.vue'
-import ChargesView from '@/views/airfreight/ChargesView.vue'
-import InvoiceView from '@/views/airfreight/InvoiceView.vue'
 import QuoteCreateView from '@/views/airfreight/QuoteCreateView.vue'
 import CreateJobView from '@/views/airfreight/CreateJobView.vue'
 import JobNewView from '@/views/airfreight/JobNewView.vue'
 import AdminStudioView from '@/views/airfreight/AdminStudioView.vue'
+import EchoLoginView from '@/views/EchoLoginView.vue'
+import { usesEchoReads } from '@/api/config'
+import { useAuthStore } from '@/stores/auth'
 
 export const router = createRouter({
   history: createWebHistory(),
   routes: [
+    {
+      path: '/login',
+      name: 'echo-login',
+      component: EchoLoginView,
+      meta: { title: 'Echo connect', public: true },
+    },
     { path: '/', redirect: '/dashboard' },
     {
       path: '/my-tasks',
@@ -89,27 +96,38 @@ export const router = createRouter({
           component: JobSpineView,
           meta: { title: 'Job Spine' },
         },
+        // Legacy money tabs → Job operate spine (Charges & Invoice)
         {
           path: 'charges',
           name: 'job-charges',
-          component: ChargesView,
-          meta: { title: 'Charges' },
+          redirect: (to) => ({
+            path: `/shipments/${to.params.shipmentId}`,
+            query: { ...to.query, step: 'money_preview' },
+          }),
         },
         {
           path: 'invoice',
           name: 'job-invoice',
-          component: InvoiceView,
-          meta: { title: 'Invoice' },
+          redirect: (to) => ({
+            path: `/shipments/${to.params.shipmentId}`,
+            query: { ...to.query, step: 'money_preview' },
+          }),
         },
       ],
     },
     {
       path: '/af-05/:shipmentId',
-      redirect: (to) => `/jobs/${to.params.shipmentId}/charges`,
+      redirect: (to) => ({
+        path: `/shipments/${to.params.shipmentId}`,
+        query: { step: 'money_preview' },
+      }),
     },
     {
       path: '/af-06/:shipmentId',
-      redirect: (to) => `/jobs/${to.params.shipmentId}/invoice`,
+      redirect: (to) => ({
+        path: `/shipments/${to.params.shipmentId}`,
+        query: { step: 'money_preview' },
+      }),
     },
     {
       path: '/jobs/create',
@@ -155,6 +173,19 @@ export const router = createRouter({
 })
 
 router.beforeEach((to) => {
+  if (to.meta.public) return true
+
+  // Hybrid/live: require Echo session before operator pages (password, stub, or session mode)
+  if (usesEchoReads()) {
+    const auth = useAuthStore()
+    if (!auth.isAuthenticated && to.name !== 'echo-login') {
+      return {
+        name: 'echo-login',
+        query: { redirect: to.fullPath },
+      }
+    }
+  }
+
   const seat = to.meta.requiresSeat as CreateFlowSeat | undefined
   if (!seat) return true
 

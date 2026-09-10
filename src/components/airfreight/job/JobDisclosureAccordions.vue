@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { FileText, Package, Users, Wallet } from '@lucide/vue'
 import type { JobContext, MarketPack } from '@/api/types'
@@ -11,16 +11,79 @@ import {
   AccordionTrigger,
 } from '@/components/ui/accordion'
 import { formatHostFactValue } from '@/lib/hostFacts'
+import { formatLedgerMoney } from '@/lib/unifiedLedger'
+import { useChargesStore } from '@/stores/charges'
 
 const props = defineProps<{
   job: JobContext
 }>()
 
 const { t } = useI18n()
+const charges = useChargesStore()
+
+watch(
+  () => props.job.shipmentId,
+  (id) => {
+    if (Number.isFinite(id) && id > 0) void charges.load(id)
+  },
+  { immediate: true },
+)
 
 const hf = computed(() => props.job.hostFacts)
 
-const moneyBadge = computed(() => hf.value?.invoiceTotal ?? props.job.ops.sellAmount)
+const live = computed(() => {
+  const p = charges.payload
+  if (!p || p.shipmentId !== props.job.shipmentId) return null
+  return p
+})
+
+const home = computed(() => live.value?.homeCurrency ?? props.job.homeCurrency ?? 'AUD')
+
+const sellDisplay = computed(() => {
+  if (live.value) return formatLedgerMoney(live.value.gp.sellTotal, home.value)
+  return props.job.ops.sellAmount || '—'
+})
+
+const costDisplay = computed(() => {
+  // Live AP accrued cost — never use hostFacts.overseasFreight (customs TIV freight)
+  if (live.value) return formatLedgerMoney(live.value.gp.accruedCostTotal, home.value)
+  return props.job.ops.costAmount || '—'
+})
+
+const marginDisplay = computed(() => {
+  if (live.value) {
+    const sell = live.value.gp.sellTotal
+    if (!sell) return '—'
+    return `${((live.value.gp.provisionalGp / sell) * 100).toFixed(1)}%`
+  }
+  return props.job.ops.marginPct || '—'
+})
+
+const gpDisplay = computed(() => {
+  if (live.value) return formatLedgerMoney(live.value.gp.provisionalGp, home.value)
+  return props.job.ops.provisionalGp || null
+})
+
+const atRiskDisplay = computed(() => {
+  if (live.value) {
+    if (live.value.blocked) {
+      return live.value.blockMessage?.trim() || 'Money locked by gate'
+    }
+    const n = charges.unresolvedVarianceCount
+    if (n > 0) return `${n} variance line${n > 1 ? 's' : ''} open`
+    const v = live.value.gp.varianceTotal
+    if (v != null && Math.abs(v) > 0.009) return `Var ${formatLedgerMoney(v, home.value)}`
+    const sell = live.value.gp.sellTotal
+    if (sell > 0) {
+      const pct = (live.value.gp.provisionalGp / sell) * 100
+      if (pct < 12) return `Margin ${pct.toFixed(1)}% below 12% gate`
+    }
+    return '—'
+  }
+  return props.job.ops.moneyAtRisk || '—'
+})
+
+const moneyBadge = computed(() => sellDisplay.value)
 
 const partyRows = computed(() => {
   const f = hf.value
@@ -214,23 +277,42 @@ function statusLabel(status: string) {
           <div class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground">Sell</div>
           <div class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground">Cost</div>
           <div class="pb-1.5 font-mono text-[12px] font-semibold text-emerald-700">
-            {{ hf?.invoiceTotal ?? job.ops.sellAmount }}
+            {{ sellDisplay }}
           </div>
-          <div class="pb-1.5 font-mono text-[12px] font-medium">{{ hf?.overseasFreight ?? job.ops.costAmount }}</div>
-          <div v-if="hf?.insurance" class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground">
-            {{ t('jobContext.hostFacts.insurance') }}
-          </div>
-          <div v-if="hf?.insurance" class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground" />
-          <div v-if="hf?.insurance" class="pb-1.5 font-mono text-[12px] font-medium">{{ hf.insurance }}</div>
+          <div class="pb-1.5 font-mono text-[12px] font-medium">{{ costDisplay }}</div>
           <div class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground">Margin</div>
           <div class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground">At risk</div>
-          <div class="pb-1.5 font-mono text-[12px] font-medium">{{ job.ops.marginPct }}</div>
-          <div class="pb-1.5 font-mono text-[12px] font-medium text-amber-800">{{ job.ops.moneyAtRisk }}</div>
-          <div v-if="job.ops.provisionalGp" class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground">
+          <div class="pb-1.5 font-mono text-[12px] font-medium">{{ marginDisplay }}</div>
+          <div
+            class="pb-1.5 font-mono text-[12px] font-medium"
+            :class="atRiskDisplay !== '—' ? 'text-amber-800' : ''"
+          >
+            {{ atRiskDisplay }}
+          </div>
+          <div
+            v-if="gpDisplay"
+            class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground"
+          >
             Provisional GP
           </div>
-          <div v-if="job.ops.provisionalGp" class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground" />
-          <div v-if="job.ops.provisionalGp" class="font-mono text-[12px] font-medium">{{ job.ops.provisionalGp }}</div>
+          <div
+            v-if="gpDisplay"
+            class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground"
+          />
+          <div v-if="gpDisplay" class="font-mono text-[12px] font-medium">{{ gpDisplay }}</div>
+          <div
+            v-if="hf?.insurance"
+            class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground"
+          >
+            {{ t('jobContext.hostFacts.insurance') }}
+          </div>
+          <div
+            v-if="hf?.insurance"
+            class="text-[9px] font-bold uppercase tracking-[0.07em] text-muted-foreground"
+          />
+          <div v-if="hf?.insurance" class="pb-1.5 font-mono text-[12px] font-medium">
+            {{ hf.insurance }}
+          </div>
         </div>
       </AccordionContent>
     </AccordionItem>

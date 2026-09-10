@@ -5,6 +5,7 @@ import JobClearanceGatePanel from '@/components/airfreight/job/JobClearanceGateP
 import JobDisclosureAccordions from '@/components/airfreight/job/JobDisclosureAccordions.vue'
 import JobHostFactsEssentials from '@/components/airfreight/job/JobHostFactsEssentials.vue'
 import JobLocalFrameStrip from '@/components/airfreight/job/JobLocalFrameStrip.vue'
+import JobMoneyBriefStrip from '@/components/airfreight/job/JobMoneyBriefStrip.vue'
 import JobOpsTruthStrip from '@/components/airfreight/job/JobOpsTruthStrip.vue'
 import JobQuoteStageBanner from '@/components/airfreight/job/JobQuoteStageBanner.vue'
 import JobSalesHandoffBanner from '@/components/airfreight/job/JobSalesHandoffBanner.vue'
@@ -52,6 +53,7 @@ const isQuoteStage = computed(
     <JobClearanceGatePanel :shipment-id="job.shipmentId" />
     <JobHostFactsEssentials v-if="showEssentials" :job="job" />
     <JobOpsTruthStrip :job="job" />
+    <JobMoneyBriefStrip :shipment-id="job.shipmentId" />
     <p class="text-[11px] text-muted-foreground">{{ t('jobContext.chunks.hint') }}</p>
     <JobDisclosureAccordions :job="job" />
   </div>
